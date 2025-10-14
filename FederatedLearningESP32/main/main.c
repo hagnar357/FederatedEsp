@@ -80,7 +80,7 @@ void deep_learning(){
             NeuralNetworkTraining();
             websocket_send_local_model();
         }else{
-            break;
+            vTaskDelay(4000 / portTICK_PERIOD_MS);
         }
         ctrl++;
     }
@@ -90,11 +90,12 @@ void deep_learning(){
 void deep_learning_test(){
     if(global_model_status()){
         FederatedLearning *globalmodelinstance = getglobalmodel();
+        printf("getmodel\n");
         replaceNeuralNetwork(globalmodelinstance);
         PrintNeuralNetwork(globalmodelinstance->neuralnetwork);
         NeuralNetworkTraining();
-        //FederatedLearning *FDI = getFederatedLearningInstance();
-        //PrintNeuralNetwork(FDI->neuralnetwork);
+        FederatedLearning *FDI = getFederatedLearningInstance();
+        PrintNeuralNetwork(FDI->neuralnetwork);
     }
 }
 
@@ -114,17 +115,19 @@ void start_esp32_configuration(){
 
 void start_federated_learning_system_button(){
     int startled = 0;
-    while (gpio_get_level(BUTTON_PIN)){
+    /*while (gpio_get_level(BUTTON_PIN)){
         startled = ~startled;
         gpio_set_level(LED_PIN_WORKING, startled);
         vTaskDelay(250 / portTICK_PERIOD_MS);
-    }
+    }*/
     gpio_set_level(LED_PIN_WORKING, 1);
 }
 
 void app_main(void){
     start_esp32_configuration();
     start_federated_learning_system_button();
+    printf("enter noderegister\n");
     node_register();
+    printf("pass noderegister\n");
     deep_learning();
 }

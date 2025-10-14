@@ -17,8 +17,8 @@
 #define BUTTON_PIN 26
 
 
-#define WIFI_SSID       "56kbps2.4GHz"
-#define WIFI_PASSWORD   "3392F15f16"
+#define WIFI_SSID       "Felps"
+#define WIFI_PASSWORD   "senha111"
 
 void WIFIConfiguration();
 void UARTConfiguration();

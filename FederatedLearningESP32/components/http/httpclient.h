@@ -8,11 +8,12 @@
 
 #define MAX_RETRIES 3   
 #define TIMEOUT_MS 1000 
+#define IP "10.58.37.184"
 
-#define GET_GLOBAL_MODEL "http://192.168.15.50:8888/api/getglobalmodel"
-#define GET_GLOBAL_MODEL_STATUS "http://192.168.15.50:8888/api/checkglobalmodel"
-#define GET_REGISTER_NODE "http://192.168.15.50:8888/api/noderegister"
-#define POST_GLOBAL_MODEL "http://192.168.15.50:8888/api/postglobalmodel"
+#define GET_GLOBAL_MODEL "http://"IP":8888/api/getglobalmodel"
+#define GET_GLOBAL_MODEL_STATUS "http://"IP":8888/api/checkglobalmodel"
+#define GET_REGISTER_NODE "http://"IP":8888/api/noderegister"
+#define POST_GLOBAL_MODEL "http://"IP":8888/api/postglobalmodel"
 
 FederatedLearning* getglobalmodel();
 int getglobalmodelstatus();

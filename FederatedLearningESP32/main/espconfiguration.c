@@ -55,7 +55,7 @@ void WIFIConfiguration()
         .sta = {
             .ssid = WIFI_SSID,
             .password = WIFI_PASSWORD}};
-    esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_configuration);
+    esp_wifi_set_config(WIFI_IF_STA, &wifi_configuration);
     printf("Wi-Fi Start Phase\n");
     // 3 - Wi-Fi Start Phase
     esp_wifi_start();

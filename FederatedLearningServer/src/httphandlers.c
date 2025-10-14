@@ -7,7 +7,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
-
+#include <sys/socket.h>
 
 void handle_root_request(int client_socket){
     const char *response = "HTTP/1.1 404 Not Found\nContent-Type: text/plain\n\nFile Not Found";
@@ -55,10 +55,23 @@ void handle_get_globalmodel(int client_socket) {
     char *response_str = cJSON_Print(json_response);
     cJSON_Delete(json_response);
 
-    const char *header = "HTTP/1.1 200 OK\nContent-Type: application/json\n\n";
+    // ✅ Cabeçalho HTTP completo e correto
+    char header[256];
+    snprintf(header, sizeof(header),
+             "HTTP/1.1 200 OK\r\n"
+             "Content-Type: application/json\r\n"
+             "Content-Length: %zu\r\n"
+             "Connection: close\r\n"
+             "\r\n",
+             strlen(response_str));
+
+    // Envia resposta HTTP corretamente
     write(client_socket, header, strlen(header));
     write(client_socket, response_str, strlen(response_str));
 
+    // Fecha conexão (boa prática)
+    shutdown(client_socket, SHUT_RDWR);
+    close(client_socket);
     free(response_str);
 }
 
@@ -72,7 +85,7 @@ void handle_post_globalmodel(int client_socket, const char *request_body) {
         printf("TEST: %s\n",request_body);
     }
 
-     cJSON *jsonModel = cJSON_Parse(request_body);
+     cJSON *jsonModel = cJSON_Parse(request_body); 
     //  char* jsonString = cJSON_Print(jsonModel);
     //  printf("%s\n", jsonString);
 
@@ -127,87 +140,108 @@ void handle_get_checkmodelstatus(int client_socket,char *ip_addr){
     }
 
     char * response_str = cJSON_Print(root);
+    
+    // ✅ Cabeçalho HTTP completo e correto
+    char header[256];
+    snprintf(header, sizeof(header),
+             "HTTP/1.1 200 OK\r\n"
+             "Content-Type: application/json\r\n"
+             "Content-Length: %zu\r\n"
+             "Connection: close\r\n"
+             "\r\n",
+             strlen(response_str));
 
-    const char *header = "HTTP/1.1 200 OK\nContent-Type: application/json\n\n";
+    // Envia resposta HTTP corretamente
     write(client_socket, header, strlen(header));
     write(client_socket, response_str, strlen(response_str));
 
-    free(response_str); 
-    cJSON_Delete(root); 
+    // Fecha conexão (boa prática)
+    shutdown(client_socket, SHUT_RDWR);
+    close(client_socket);
 }
 
-void handle_get_noderegister(int client_socket,char *ip_addr){
 
+
+void handle_get_noderegister(int client_socket, char *ip_addr) {
     printf("Client IP: %s\n", ip_addr);
 
     char *response_str;
-    
+
     FederatedLearning *fedLearninginstance = getFederatedLearningInstance();
     ClientNode *clientnode;
 
-    if(fedLearninginstance->nodecontrol->clientnodesregistered==fedLearninginstance->nodecontrol->clientnodes){
+    if (fedLearninginstance->nodecontrol->clientnodesregistered == fedLearninginstance->nodecontrol->clientnodes) {
         response_str = "{\"status\":\"limit reached\"}";
         printf("Node limit reached\n");
-    }
-    else{
-
-        if(fedLearninginstance->nodecontrol->firstclientnode==NULL){
+    } else {
+        if (fedLearninginstance->nodecontrol->firstclientnode == NULL) {
             clientnode = (ClientNode *)malloc(sizeof(ClientNode));
-            clientnode->interaction=0;
-            strcpy(clientnode->ip_id,ip_addr);
-            clientnode->nextclientnode=NULL;
-            clientnode->previousclientnode=clientnode->nextclientnode;
+            clientnode->interaction = 0;
+            strcpy(clientnode->ip_id, ip_addr);
+            clientnode->nextclientnode = NULL;
+            clientnode->previousclientnode = NULL;
 
             fedLearninginstance->nodecontrol->firstclientnode = clientnode;
             fedLearninginstance->nodecontrol->lastclientnode = clientnode;
-            
             fedLearninginstance->nodecontrol->clientnodesregistered++;
 
             response_str = "{\"status\":\"added\"}";
             printf("First client node Added\n");
-        }
-        else{
-            int ctrl=1;
-            clientnode = getFederatedLearningInstance()->nodecontrol->firstclientnode;
+        } else {
+            int ctrl = 1;
+            clientnode = fedLearninginstance->nodecontrol->firstclientnode;
 
-            while(clientnode!=NULL){
-            //printf("%d %s %s\n",strcmp(nodeclient->ip_id,newip_id),nodeclient->ip_id,newip_id);
-
-                if(strcmp(clientnode->ip_id,ip_addr)==0){
+            while (clientnode != NULL) {
+                if (strcmp(clientnode->ip_id, ip_addr) == 0) {
                     response_str = "{\"status\":\"registred\"}";
                     printf("Node already Added\n");
                     ctrl = 0;
+                    break;
                 }
                 clientnode = clientnode->nextclientnode;
             }
 
-            if(ctrl!=0){
+            if (ctrl != 0) {
                 clientnode = (ClientNode *)malloc(sizeof(ClientNode));
-                clientnode->interaction=0;
-                strcpy(clientnode->ip_id,ip_addr);
-                clientnode->nextclientnode=NULL;
+                clientnode->interaction = 0;
+                strcpy(clientnode->ip_id, ip_addr);
+                clientnode->nextclientnode = NULL;
+                clientnode->previousclientnode = fedLearninginstance->nodecontrol->lastclientnode;
 
                 fedLearninginstance->nodecontrol->lastclientnode->nextclientnode = clientnode;
-                clientnode->previousclientnode = fedLearninginstance->nodecontrol->lastclientnode;
                 fedLearninginstance->nodecontrol->lastclientnode = clientnode;
-
                 fedLearninginstance->nodecontrol->clientnodesregistered++;
-
 
                 response_str = "{\"status\":\"added\"}";
                 printf("Client node Added\n");
             }
         }
-
     }
 
-    if(fedLearninginstance->nodecontrol->clientnodesregistered==fedLearninginstance->nodecontrol->clientnodes){
-        fedLearninginstance->globalmodelstatus=1;
+    if (fedLearninginstance->nodecontrol->clientnodesregistered == fedLearninginstance->nodecontrol->clientnodes) {
+        fedLearninginstance->globalmodelstatus = 1;
     }
-    printf("client nodes registered %d client nodes %d\n",fedLearninginstance->nodecontrol->clientnodesregistered,fedLearninginstance->nodecontrol->clientnodes);
+
+    printf("client nodes registered %d client nodes %d\n",
+           fedLearninginstance->nodecontrol->clientnodesregistered,
+           fedLearninginstance->nodecontrol->clientnodes);
     printf("Global Model Status %d\n", fedLearninginstance->globalmodelstatus);
 
-    const char *header = "HTTP/1.1 200 OK\nContent-Type: application/json\n\n";
+    // ✅ Cabeçalho HTTP completo e correto
+    char header[256];
+    snprintf(header, sizeof(header),
+             "HTTP/1.1 200 OK\r\n"
+             "Content-Type: application/json\r\n"
+             "Content-Length: %zu\r\n"
+             "Connection: close\r\n"
+             "\r\n",
+             strlen(response_str));
+
+    // Envia resposta HTTP corretamente
     write(client_socket, header, strlen(header));
     write(client_socket, response_str, strlen(response_str));
+
+    // Fecha conexão (boa prática)
+    shutdown(client_socket, SHUT_RDWR);
+    close(client_socket);
 }

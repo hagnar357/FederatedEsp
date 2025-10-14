@@ -251,7 +251,7 @@ void http_post_task(void *pvParameters) {
     esp_err_t err;
 
     esp_http_client_config_t config = {
-        .url = "http://192.168.15.50:8888/api/testpost",
+        .url = "http://" IP ":8888/api/testpost",
         .event_handler = _http_event_handler,
     };
 

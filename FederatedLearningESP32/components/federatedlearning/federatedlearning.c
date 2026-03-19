@@ -534,7 +534,7 @@ void BackPropagation(NeuralNetwork *neuralnetwork, float *label, float alpha, in
       //printf("layer %d \n",layer);
       float * deltafunctionsaux = (float * ) malloc(deltafunctionsnumber * sizeof(float));
       memcpy(deltafunctionsaux, deltafunctions, deltafunctionsnumber * sizeof(float));
-      deltafunctions = (float * ) realloc(deltafunctions, currentlayer->neurons * sizeof(int));
+      deltafunctions = (float * ) k_realloc(deltafunctions, currentlayer->neurons * sizeof(int));
           
       float deltafunctionaccumulation;
 

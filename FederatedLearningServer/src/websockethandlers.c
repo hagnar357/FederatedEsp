@@ -10,7 +10,11 @@ void handle_clint_model_message(const char * message, int length,char *ip_addr){
     char* json_string;
     json_string =strndup(message, length);
 
+    printf("Recebeu ws");
+
     if (json_string != NULL) {
+        printf("json not null");
+        
         cJSON *json_model = cJSON_Parse(json_string);
         if (json_model != NULL) { 
 

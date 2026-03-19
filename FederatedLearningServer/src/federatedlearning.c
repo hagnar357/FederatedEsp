@@ -638,7 +638,7 @@ void setFederatedLearningGlobalModel() {
   federatedLearningInstance->neuralnetwork->lambda =0.01;
 
   federatedLearningInstance->nodecontrol->interactioncycle=12;
-  federatedLearningInstance->nodecontrol->clientnodes=3;
+  federatedLearningInstance->nodecontrol->clientnodes=1;
   federatedLearningInstance->nodecontrol->clientnodesregistered=0;
   InitializeNeuralNetWork(federatedLearningInstance->nodecontrol->neuralnetwork, 4 ,layerconfig0, CATEGORICAL_CROSS_ENTROPY,WEIGHT_VALUE_ZERO);
   federatedLearningInstance->nodecontrol->neuralnetwork->alpha=0.001;

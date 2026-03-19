@@ -1,13 +1,10 @@
-#include "../lib/JSONConverter.h"
-#include "../lib/federatedlearning.h"
-#include <stdlib.h>
+#include "JSONConverter.h"
 #include <string.h>
 #include <stdio.h>
 
-//FFEDERATED LEARNING TO JSON
-cJSON* FederatedLearningToJSON(FederatedLearning* federatedLearning) {
+//JSON TO FFEDERATED LEARNING  
+cJSON* federatedLearningToJSON(const FederatedLearning* federatedLearning) {
     cJSON* root = cJSON_CreateObject();
-    if (!root) return NULL;
 
     cJSON_AddItemToObject(root, "globalmodelstatus", cJSON_CreateNumber(federatedLearning->globalmodelstatus));
     cJSON_AddItemToObject(root, "trainingscounter", cJSON_CreateNumber(federatedLearning->trainingscounter));
@@ -40,7 +37,6 @@ cJSON* FederatedLearningToJSON(FederatedLearning* federatedLearning) {
             cJSON_AddItemToObject(neuronObject, "weights", cJSON_CreateNumber(currentNeuron->weights));
             cJSON_AddItemToObject(neuronObject, "bias", cJSON_CreateNumber(currentNeuron->bias));
 
-            // Adiciona um array de pesos para cada neurônio
             cJSON* weightsArray = cJSON_CreateArray();
             struct Weight* currentWeight = currentNeuron->firstweight;
 
@@ -62,17 +58,14 @@ cJSON* FederatedLearningToJSON(FederatedLearning* federatedLearning) {
 
     cJSON_AddItemToObject(jsonNeuralNetwork, "layersArray", layersArray);
 
-    // Adicione outros campos da estrutura FederatedLearning conforme necessário
+
 
     return root;
 }
 
-
 //JSON TO FEDERATED LEARNING  
-
 FederatedLearning* JSONToFederatedLearning(const cJSON* json) {
     if (json == NULL || !cJSON_IsObject(json)) {
-        printf("Não foi possível converter.\n");
         return NULL;
     }
 
@@ -126,21 +119,19 @@ FederatedLearning* JSONToFederatedLearning(const cJSON* json) {
         cJSON* lambdaItem = cJSON_GetObjectItem(neuralNetworkItem, "lambda");
         if (cJSON_IsNumber(lambdaItem)) {
             federatedLearning->neuralnetwork->lambda = lambdaItem->valuedouble;
-            //printf("lambda %f\n", federatedLearning->neuralnetwork->lambda);
+           // printf("lambda %f\n", federatedLearning->neuralnetwork->lambda);
         }
 
         cJSON* percentualtrainingItem = cJSON_GetObjectItem(neuralNetworkItem, "percentualtraining");
         if (cJSON_IsNumber(percentualtrainingItem)) {
             federatedLearning->neuralnetwork->percentualtraining = percentualtrainingItem->valueint;
             //printf("percentualtraining %d\n", federatedLearning->neuralnetwork->percentualtraining);
-
         }
 
         cJSON* lossfunctiontypeItem = cJSON_GetObjectItem(neuralNetworkItem, "lossfunctiontype");
         if (cJSON_IsNumber(lossfunctiontypeItem)) {
             federatedLearning->neuralnetwork->lossfunctiontype = lossfunctiontypeItem->valueint;
-            //printf("lossfunctiontype %d\n", federatedLearning->neuralnetwork->lossfunctiontype);
-
+           // printf("lossfunctiontype %d\n", federatedLearning->neuralnetwork->lossfunctiontype);
         }
 
         cJSON* layersItem = cJSON_GetObjectItem(neuralNetworkItem, "layers");
@@ -164,14 +155,18 @@ FederatedLearning* JSONToFederatedLearning(const cJSON* json) {
 
                     layer->firstneuron = layer->lastneuron = NULL;  
                     layer->nextlayer = layer->previouslayer = NULL;
-                    cJSON* neuronsItem = cJSON_GetObjectItem(layerElement, "neurons");
 
+                    cJSON* neuronsItem = cJSON_GetObjectItem(layerElement, "neurons");
                     if (cJSON_IsNumber(neuronsItem)) {
                         layer->neurons = neuronsItem->valueint;
-                    } else {
-                        //printf("erro ao assossiar quantidades de neuronios a camada");
                     }
                     //printf(" neurons: %d\n", layer->neurons);
+
+                    cJSON* activationfunctiontypeItem = cJSON_GetObjectItem(layerElement, "activationfunctiontype");
+                    if (cJSON_IsNumber(activationfunctiontypeItem)) {
+                        layer->activationfunctiontype = activationfunctiontypeItem->valueint;
+                    }
+                    //printf("activationfunctiontype: %d\n", layer->activationfunctiontype);
 
                     if (federatedLearning->neuralnetwork->lastlayer == NULL) {
                         federatedLearning->neuralnetwork->firstlayer = federatedLearning->neuralnetwork->lastlayer = layer;
@@ -198,38 +193,24 @@ FederatedLearning* JSONToFederatedLearning(const cJSON* json) {
 
                             neuron->nextneuron = neuron->previousneuron = NULL;
                             neuron->firstweight = neuron->lastweight = NULL;
-                            cJSON* neurontypeItem = cJSON_GetObjectItem(neuronElement, "neurontype");
 
+                            cJSON* neurontypeItem = cJSON_GetObjectItem(neuronElement, "neurontype");
                             if (cJSON_IsString(neurontypeItem)) {
                                 strncpy(neuron->neurontype, neurontypeItem->valuestring, sizeof(neuron->neurontype));
-                            } else {
-                                //printf("erro ao assossiar o tipo do neuronio ao neuronio");
-
                             }
-
-                                //printf(" type %s",neuron->neurontype);
+                            //printf(" type %s",neuron->neurontype);
 
                             cJSON* weightsItem = cJSON_GetObjectItem(neuronElement, "weights");
-
                             if (cJSON_IsNumber(weightsItem)) {
                                 neuron->weights = weightsItem->valueint;
-                            } else {
-                                //printf("erro ao assossiar quantidades de pesos ao neuronio");
                             }
-
                             //printf(" Weights: %d\n", neuron->weights);
 
-
                             cJSON* biasItem = cJSON_GetObjectItem(neuronElement, "bias");
-
                             if (cJSON_IsNumber(biasItem)) {
                                 neuron->bias = (float)biasItem->valuedouble;
-                            } else {
-                                //printf("erro ao assossiar quantidades de bias ao neuronio");
                             }
-
                             //printf("Bias: %.2f\n", neuron->bias);
-
 
                             if (layer->lastneuron == NULL) {
                                 layer->firstneuron = layer->lastneuron = neuron;
@@ -256,7 +237,6 @@ FederatedLearning* JSONToFederatedLearning(const cJSON* json) {
                                     weight->previousweight = weight->nextweight = NULL;
                                     //printf(" %.2f\n", weight->weight);
 
-
                                     if (neuron->lastweight == NULL) {
                                         neuron->firstweight = neuron->lastweight = weight;
                                     } else {
@@ -264,26 +244,14 @@ FederatedLearning* JSONToFederatedLearning(const cJSON* json) {
                                         weight->previousweight = neuron->lastweight;
                                         neuron->lastweight = weight;
                                     }
-                                    
                                 }     
                             }
-
-                           
-
-
                         }
                     }
-
                 }
-            } else {
-                // Tratar erro conforme necessário
-            }
-        } else {
-            // Tratar erro conforme necessário
-        }
-    } else {
-        // Tratar erro conforme necessário
-    }
+            } 
+        } 
+    } 
 
     //PrintNeuralNetwork(federatedLearning->neuralnetwork);
 

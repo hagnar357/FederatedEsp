@@ -17,8 +17,8 @@
 #define BUTTON_PIN 26
 
 
-#define WIFI_SSID       "Felps"
-#define WIFI_PASSWORD   "senha111"
+#define WIFI_SSID       "Alves"
+#define WIFI_PASSWORD   "O4pN71nV"
 
 void WIFIConfiguration();
 void UARTConfiguration();

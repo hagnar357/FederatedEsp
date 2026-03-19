@@ -227,7 +227,7 @@ static esp_err_t esp_websocket_client_abort_connection(esp_websocket_client_hand
 
     if (client->config->auto_reconnect) {
         client->reconnect_tick_ms = _tick_get_ms();
-        ESP_LOGI(TAG, "Reconnect after %d ms", client->wait_timeout_ms);
+        LOG_INF(TAG, "Reconnect after %d ms", client->wait_timeout_ms);
     }
 
     client->error_handle.error_type = error_type;
@@ -1033,7 +1033,7 @@ static void esp_websocket_client_task(void *pv)
             }
         } else if (WEBSOCKET_STATE_WAIT_TIMEOUT == client->state) {
             // waiting for reconnecting...
-            vTaskDelay(client->wait_timeout_ms / 2 / portTICK_PERIOD_MS);
+            k_msleep(client->wait_timeout_ms / 2 / portTICK_PERIOD_MS);
         } else if (WEBSOCKET_STATE_CLOSING == client->state &&
                    (CLOSE_FRAME_SENT_BIT & xEventGroupGetBits(client->status_bits))) {
             ESP_LOGD(TAG, " Waiting for TCP connection to be closed by the server");

@@ -79,11 +79,11 @@ esp_err_t client_event_get_handler(esp_http_client_event_handle_t evt)
             break;
 
         case HTTP_EVENT_ON_FINISH:
-            ESP_LOGI(TAG, "HTTP_EVENT_ON_FINISH");
+            LOG_INF(TAG, "HTTP_EVENT_ON_FINISH");
             break;
 
         case HTTP_EVENT_DISCONNECTED:
-            ESP_LOGI(TAG, "HTTP_EVENT_DISCONNECTED");
+            LOG_INF(TAG, "HTTP_EVENT_DISCONNECTED");
             break;
 
         default:
@@ -122,7 +122,7 @@ void perform_get_request(const char *url)
             int64_t end_time = esp_timer_get_time();
             int64_t elapsed_time = (end_time - start_time) / 1000; 
 
-            ESP_LOGI(TAG, "Request Successful, Latency: %lld ms", elapsed_time);
+            LOG_INF(TAG, "Request Successful, Latency: %lld ms", elapsed_time);
             break; 
 
         } else {
@@ -195,6 +195,7 @@ FederatedLearning *getglobalmodel() {
 
     FederatedLearning *FederatedLearningInstance = NULL;
     if (response_buffer != NULL) {
+         printf("Free heap pré jtfl: %d\n", esp_get_free_heap_size());
         cJSON *req = cJSON_Parse(response_buffer);
         if (req != NULL) {
             FederatedLearningInstance = JSONToFederatedLearning(req);
@@ -204,6 +205,7 @@ FederatedLearning *getglobalmodel() {
         }
         free(response_buffer);
         response_buffer = NULL;
+         printf("Free heap pós jtfl: %d\n", esp_get_free_heap_size());
     }
     return FederatedLearningInstance;
 }
@@ -216,31 +218,31 @@ FederatedLearning *getglobalmodel() {
 esp_err_t _http_event_handler(esp_http_client_event_t *evt) {
     switch (evt->event_id) {
         case HTTP_EVENT_ERROR:
-            ESP_LOGI(TAG, "HTTP_EVENT_ERROR");
+            LOG_INF(TAG, "HTTP_EVENT_ERROR");
             break;
         case HTTP_EVENT_ON_CONNECTED:
-            ESP_LOGI(TAG, "HTTP_EVENT_ON_CONNECTED");
+            LOG_INF(TAG, "HTTP_EVENT_ON_CONNECTED");
             break;
         case HTTP_EVENT_HEADER_SENT:
-            ESP_LOGI(TAG, "HTTP_EVENT_HEADER_SENT");
+            LOG_INF(TAG, "HTTP_EVENT_HEADER_SENT");
             break;
         case HTTP_EVENT_ON_HEADER:
-            ESP_LOGI(TAG, "HTTP_EVENT_ON_HEADER, key=%s, value=%s", evt->header_key, evt->header_value);
+            LOG_INF(TAG, "HTTP_EVENT_ON_HEADER, key=%s, value=%s", evt->header_key, evt->header_value);
             break;
         case HTTP_EVENT_ON_DATA:
-            ESP_LOGI(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
+            LOG_INF(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
                 if (!esp_http_client_is_chunked_response(evt->client)) {
                     printf("%.*s", evt->data_len, (char*)evt->data);
                 }
             break;
         case HTTP_EVENT_ON_FINISH:
-            ESP_LOGI(TAG, "HTTP_EVENT_ON_FINISH");
+            LOG_INF(TAG, "HTTP_EVENT_ON_FINISH");
             break;
         case HTTP_EVENT_DISCONNECTED:
-            ESP_LOGI(TAG, "HTTP_EVENT_DISCONNECTED");
+            LOG_INF(TAG, "HTTP_EVENT_DISCONNECTED");
             break;
         default:
-            ESP_LOGI(TAG, "Unhandled event ID: %d", evt->event_id);
+            LOG_INF(TAG, "Unhandled event ID: %d", evt->event_id);
             break;
     }
     return ESP_OK;

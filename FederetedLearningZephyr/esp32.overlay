@@ -1,0 +1,75 @@
+/* Importa o dicionário de pinos do ESP32-S3 */
+#include <zephyr/dt-bindings/pinctrl/esp32s3-pinctrl.h>
+
+/* Importa o dicionário de velocidades do I2C (Resolve o erro do BITRATE) */
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+/ {
+	/* 1. Configuração de Automount do Sistema de Arquivos */
+	fstab {
+		compatible = "zephyr,fstab";
+		lfs1: lfs1 {
+			compatible = "zephyr,fstab,littlefs";
+			mount-point = "/storage";
+			partition = <&storage_partition>;
+			automount;
+			read-size = <16>;
+			prog-size = <16>;
+			cache-size = <64>;
+			lookahead-size = <32>;
+			block-cycles = <512>;
+		};
+	};
+};
+
+/* 2. Mapeamento dos Pinos para o ESP32-S3 (Heltec V3) */
+&pinctrl {
+	i2c0_default: i2c0_default {
+		group1 {
+			/* Pinos I2C ajustados para o hardware da Heltec V3 */
+			/* Se o seu sensor estiver em pinos diferentes, mude os números abaixo (ex: GPIO41) */
+			pinmux = <I2C0_SDA_GPIO17>, <I2C0_SCL_GPIO18>;
+			bias-pull-up;
+			drive-open-drain;
+			output-high;
+		};
+	};
+};
+
+/* 3. Ativação do Barramento I2C */
+&i2c0 {
+	status = "okay";
+	clock-frequency = <I2C_BITRATE_STANDARD>; 
+	pinctrl-0 = <&i2c0_default>;
+	pinctrl-names = "default";
+};
+
+/* 4. Redefinição das Partições da Memória Flash */
+/* 4. Redefinição das Partições da Memória Flash */
+&flash0 {
+	/delete-node/ partitions;
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/* CORREÇÃO: O Bootloader do ESP32-S3 inicia obrigatoriamente em 0x0 */
+		boot_partition: partition@0 {
+			label = "mcuboot";
+			reg = <0x00000000 0x00010000>;
+			read-only;
+		};
+
+		/* Partição do seu código (lógica e RTOS) */
+		slot0_partition: partition@10000 {
+			label = "image-0";
+			reg = <0x00010000 0x00100000>; /* 1 MB para o código */
+		};
+
+		/* Partição para o dataset.csv usando LittleFS */
+		storage_partition: partition@110000 {
+			label = "storage";
+			reg = <0x00110000 0x00100000>; /* 1 MB de espaço para o CSV */
+		};
+	};
+};

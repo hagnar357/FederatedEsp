@@ -1,20 +1,17 @@
 #include <stdio.h>
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/timers.h"
-#include "freertos/event_groups.h"
+#include <zephyr/kernel.h>          // Substitui TUDO do FreeRTOS
+#include <zephyr/fs/fs.h>           // Substitui o esp_spiffs.h
+#include <zephyr/fs/littlefs.h>     // Sistema de arquivos recomendado para Flash
+#include <zephyr/drivers/i2c.h>     // Substitui driver/i2c.h
+#include <zephyr/sys/reboot.h>      // Provável substituto para funções do esp_system.h
+#include <zephyr/net/net_ip.h>
 
 #include "espconfiguration.h"
 #include "httpclient.h"
 #include "websocketclient.h"
 #include "federatedlearning.h"
 #include "JSONConverter.h"
-#include "esp_spiffs.h"
-
-
-#include "driver/i2c.h"
-#include "esp_system.h"
 
 
 // Defina o endereço I2C do INA219 (geralmente é 0x40)
@@ -27,40 +24,40 @@
 void brink_error_led(int blink){
 
     for(int i=0;i<blink;i++){
-        gpio_set_level(LED_PIN_ERROR, 1);
-        k_msleep(100 / portTICK_PERIOD_MS);
-        gpio_set_level(LED_PIN_ERROR, 0);
+        // gpio_set_level(LED_PIN_ERROR, 1);
+        k_msleep(100);
+        // gpio_set_level(LED_PIN_ERROR, 0);
     }
 }
 
 void node_register(){
-    gpio_set_level(LED_PIN_SYNC, 1);
+    // gpio_set_level(LED_PIN_SYNC, 1);
     getregisternode();
-    k_msleep(100 / portTICK_PERIOD_MS);
-    gpio_set_level(LED_PIN_SYNC, 0);
+    k_msleep(100);
+    // gpio_set_level(LED_PIN_SYNC, 0);
 }
 
 int global_model_status(){
     int status=0;
-    gpio_set_level(LED_PIN_SYNC, 1);
+    // gpio_set_level(LED_PIN_SYNC, 1);
     status=getglobalmodelstatus();
-    k_msleep(50 / portTICK_PERIOD_MS);
-    gpio_set_level(LED_PIN_SYNC, 0);
-    k_msleep(50 / portTICK_PERIOD_MS);
+    k_msleep(50);
+    // gpio_set_level(LED_PIN_SYNC, 0);
+    k_msleep(50);
     return status;
 }
 
 FederatedLearning *global_model(){
-    gpio_set_level(LED_PIN_SYNC, 1);
+    // gpio_set_level(LED_PIN_SYNC, 1);
     FederatedLearning *globalmodelinstance = getglobalmodel();
-    gpio_set_level(LED_PIN_SYNC, 0);
+    // gpio_set_level(LED_PIN_SYNC, 0);
     if(globalmodelinstance==NULL){
         while (globalmodelinstance==NULL){
             printf("Json null\n");
             brink_error_led(2);
-            gpio_set_level(LED_PIN_SYNC, 1);
+            // gpio_set_level(LED_PIN_SYNC, 1);
             globalmodelinstance = getglobalmodel();     
-            gpio_set_level(LED_PIN_SYNC, 0);
+            // gpio_set_level(LED_PIN_SYNC, 0);
         }
     }else{
             printf("Json not null\n");
@@ -80,7 +77,7 @@ void deep_learning(){
             NeuralNetworkTraining();
             websocket_send_local_model();
         }else{
-            k_msleep(4000 / portTICK_PERIOD_MS);
+            k_msleep(4000);
         }
         ctrl++;
     }
@@ -102,14 +99,14 @@ void deep_learning_test(){
 
 void start_esp32_configuration(){
 
-    UARTConfiguration();
+    // UARTConfiguration();
     GPIOConfiguration();
     WIFIConfiguration();
-    SPIFFSConfiguration();
+    // SPIFFSConfiguration();
     
-    gpio_set_level(LED_PIN_ERROR, 0);
-    gpio_set_level(LED_PIN_SYNC, 0);
-    k_msleep(2000 / portTICK_PERIOD_MS);
+    // gpio_set_level(LED_PIN_ERROR, 0);
+    // gpio_set_level(LED_PIN_SYNC, 0);
+    k_msleep(2000);
 
 }
 
@@ -118,16 +115,29 @@ void start_federated_learning_system_button(){
     /*while (gpio_get_level(BUTTON_PIN)){
         startled = ~startled;
         gpio_set_level(LED_PIN_WORKING, startled);
-        vTaskDelay(250 / portTICK_PERIOD_MS);
+        k_msleep(250);
     }*/
-    gpio_set_level(LED_PIN_WORKING, 1);
+    //gpio_set_level(LED_PIN_WORKING, 1);
 }
 
-void app_main(void){
+int main(){
+    printf("iniciou");
     start_esp32_configuration();
+    printf("1");
     start_federated_learning_system_button();
+
+    // Tenta pegar a ficha. Se retornar 0, significa que pegou com sucesso!
+    if (k_sem_take(&wifi_connected_sem, K_SECONDS(15)) == 0) {
+        printf("Acesso liberado! Iniciando comunicacao com o servidor...\n");
+    } else {
+        printf("ERRO FATAL: Timeout. O roteador nao forneceu o IP.\n");
+        // Opcional: Você pode colocar um k_msleep aqui e reiniciar a placa (sys_reboot)
+    }
+    
     printf("enter noderegister\n");
     node_register();
     printf("pass noderegister\n");
     deep_learning();
+
+    return 0;
 }

@@ -45,6 +45,8 @@
 #include <ctype.h>
 #include <float.h>
 
+#include <zephyr/kernel.h>
+
 #ifdef ENABLE_LOCALES
 #include <locale.h>
 #endif

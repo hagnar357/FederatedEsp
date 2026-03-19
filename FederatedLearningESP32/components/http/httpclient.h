@@ -4,11 +4,11 @@
 #include "esp_http_client.h"
 #include "federatedlearning.h"
 #include "JSONConverter.h"
-
+//#include "configs.c"
 
 #define MAX_RETRIES 3   
 #define TIMEOUT_MS 1000 
-#define IP "10.58.37.184"
+#define IP "192.168.18.192"
 
 #define GET_GLOBAL_MODEL "http://"IP":8888/api/getglobalmodel"
 #define GET_GLOBAL_MODEL_STATUS "http://"IP":8888/api/checkglobalmodel"

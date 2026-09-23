@@ -99,5 +99,6 @@ FederatedLearning *getFederatedLearningInstance();
 void PrintNeuralNeuralNetwork(NeuralNetwork * neuralnetwork);
 void setFederatedLearningGlobalModel();
 void AggregationModel(FederatedLearning * clientmodel);
-void PerformanceMetrics(NeuralNetwork * neuralnetwork,int PercentualEvaluation,float Threshold);
+void PerformanceMetrics(NeuralNetwork * neuralnetwork,int PercentualEvaluation,float Threshold, int clientnodes);
+void SaveModel(int interaction);
 #endif

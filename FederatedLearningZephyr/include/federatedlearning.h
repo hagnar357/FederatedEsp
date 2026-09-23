@@ -70,4 +70,6 @@ void PrintNeuralNetwork(NeuralNetwork * neuralnetwork);
 void NeuralNetworkTraining();
 void teste();
 
+int contar_instancias(const char *caminho_arquivo);
+
 #endif

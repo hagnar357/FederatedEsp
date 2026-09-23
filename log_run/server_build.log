@@ -1,0 +1,8 @@
+gcc -Wall -Wextra -Ilib -c src/cJSON.c -o .build/cJSON.o
+gcc -Wall -Wextra -Ilib -c src/federatedlearning.c -o .build/federatedlearning.o
+gcc -Wall -Wextra -Ilib -c src/httphandlers.c -o .build/httphandlers.o
+gcc -Wall -Wextra -Ilib -c src/httpserver.c -o .build/httpserver.o
+gcc -Wall -Wextra -Ilib -c src/JSONConverter.c -o .build/JSONConverter.o
+gcc -Wall -Wextra -Ilib -c src/websockethandlers.c -o .build/websockethandlers.o
+gcc -Wall -Wextra -Ilib -c src/websocketserver.c -o .build/websocketserver.o
+gcc -Wall -Wextra .build/cJSON.o .build/federatedlearning.o .build/httphandlers.o .build/httpserver.o .build/JSONConverter.o .build/websockethandlers.o .build/websocketserver.o main.c -o FederatedLearningServer -lpthread -lwebsockets -lm

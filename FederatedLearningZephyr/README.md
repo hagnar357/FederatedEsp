@@ -76,7 +76,7 @@ mklittlefs -c fs_data -p 16 -b 4096 -s 1048576 storage.bin
 ### Passo 3.3: Injetar a imagem na Flash do ESP32-S3
 Use o `esptool.py` para gravar o arquivo `storage.bin` exatamente no endereço de montagem da partição (`0x110000`):
 ```bash
-esptool.py --chip esp32s3 --port /dev/USB00 --baud 460800 write_flash 0x110000 storage.bin
+esptool.py --chip esp32s3 --port /dev/USB0 --baud 460800 write_flash 0x110000 storage.bin
 ```
 *(Nota: Altere `/dev/ttyUSB0` para a porta USB correta onde seu ESP32 está conectado).*
 
@@ -87,7 +87,7 @@ esptool.py --chip esp32s3 --port /dev/USB00 --baud 460800 write_flash 0x110000 s
 
 **Para compilar :**
 ```bash
-west build -b heltec_wireless_stick_lite_v3/esp32s3/procpu ../Documentos/Lab/FederatedEdgeComputing/FederatedLearningZephyr --pristine
+west build -b heltec_wireless_stick_lite_v3/esp32s3/procpu ./FederatedEdgeComputing/FederatedLearningZephyr --pristine
 
 ```
 
@@ -104,7 +104,7 @@ west espressif monitor
 
 **Fazendo tudo junto**
 ```bash
-west build -b heltec_wireless_stick_lite_v3/esp32s3/procpu ../Documentos/Lab/FederatedEdgeComputing/FederatedLearningZephyr --pristine  && west flash --esp-device /dev/ttyUSB0  && west espressif monitor -p /dev/ttyUSB0
+west build -b heltec_wireless_stick_lite_v3/esp32s3/procpu ./FederatedEdgeComputing/FederatedLearningZephyr --pristine  && west flash --esp-device /dev/ttyUSB0  && west espressif monitor -p /dev/ttyUSB0
 ```
 ---
 

@@ -5,7 +5,7 @@
 #include <string.h>
 
 #include "federatedlearning.h"
-
+#include "espconfiguration.h"
 #include <zephyr/fs/fs.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/kernel.h>
@@ -31,6 +31,47 @@ ssize_t zephyr_fgets(char *buf, size_t max_len, struct fs_file_t *file) {
     }
     buf[i] = '\0';
     return i; // Retorna quantos bytes leu (0 = EOF)
+}
+
+int contar_instancias(const char *caminho_arquivo) {
+    struct fs_file_t file;
+    fs_file_t_init(&file);
+
+    int rc = fs_open(&file, caminho_arquivo, FS_O_READ);
+    if (rc < 0) {
+        LOG_ERR("Erro %d ao abrir o arquivo %s para contagem.", rc, caminho_arquivo);
+        return -1;
+    }
+
+    uint8_t buffer[READ_BUFFER_SIZE];
+    int total_linhas = 0;
+    ssize_t bytes_lidos;
+    uint8_t ultimo_caractere = '\n'; // Previne contagem errada em arquivos vazios
+
+    // Lê o arquivo em blocos
+    while ((bytes_lidos = fs_read(&file, buffer, READ_BUFFER_SIZE)) > 0) {
+        for (ssize_t i = 0; i < bytes_lidos; i++) {
+            if (buffer[i] == '\n') {
+                total_linhas++;
+            }
+        }
+        // Guarda o último caractere do bloco atual
+        ultimo_caractere = buffer[bytes_lidos - 1];
+    }
+
+    if (bytes_lidos < 0) {
+        LOG_ERR("Erro %d durante a leitura do arquivo para contagem.", (int)bytes_lidos);
+        fs_close(&file);
+        return -1;
+    }
+
+    // Se o dataset não termina com '\n', a última linha precisa ser contada
+    if (ultimo_caractere != '\n') {
+        total_linhas++;
+    }
+
+    fs_close(&file);
+    return total_linhas;
 }
 
 void PrintNeuralNetwork(NeuralNetwork * neuralnetwork) {
@@ -623,15 +664,27 @@ void NeuralNetworkTraining() {
 
   char line[1024];
   Neuron * currentneuron = NULL;
+
+  // 1. Conta as instâncias totais no CSV
+  int total_instancias = contar_instancias(DATA_PATH);
+  if (total_instancias <= 0) {
+      LOG_ERR("Dataset vazio ou erro na leitura. Abortando treinamento.");
+      return;
+  }
   
- // Declara a estrutura do arquivo nativa do Zephyr
+  // 2. Define o limite de instâncias para treinamento baseado na proporção desejada
+  // Supondo que você queira usar uma porcentagem das instâncias (ex: 80%)
+  neuralnetwork->percentualtraining = (int)total_instancias;
+  
+  LOG_INF("Iniciando treino. Instâncias no Dataset: %d",neuralnetwork->percentualtraining);
+  
+  // Declara a estrutura do arquivo nativa do Zephyr
     struct fs_file_t file;
 
     for (int TrainingCycle = 0; TrainingCycle < neuralnetwork->epoch; TrainingCycle++) {
-
         // 1. Inicializa e abre o arquivo pelo Zephyr
         fs_file_t_init(&file);
-        int rc = fs_open(&file, "/storage/dataset.csv", FS_O_READ);
+        int rc = fs_open(&file, DATA_PATH, FS_O_READ);
 
         if (rc < 0) {
             LOG_ERR("Erro %d ao abrir o arquivo CSV.", rc);
@@ -647,16 +700,17 @@ void NeuralNetworkTraining() {
                 break;
             }
 
+            int num_data = neuralnetwork->firstlayer->neurons + neuralnetwork->lastlayer->neurons;
             char * token = strtok(line, ","); 
 
-            for (int i = 0; i < 7; i++){
-                token = strtok(NULL, ",");
+            for (int i = 0; i < num_data; i++){
                 if (token != NULL) {
                   trainingsample[i] = strtof(token, NULL);
                 } else {
                     LOG_ERR("Error: Not enough data in the line.\n");
                     break;
                 }
+                token = strtok(NULL, ",");
             }
 
             //set the input data on inputdata vector
@@ -667,7 +721,7 @@ void NeuralNetworkTraining() {
             }
 
             //set the label on label vector
-            for (int i = neuralnetwork->firstlayer->neurons; i < neuralnetwork->firstlayer->neurons + neuralnetwork->lastlayer->neurons; i++) {
+            for (int i = neuralnetwork->firstlayer->neurons; i < num_data; i++) {
                 label[i - neuralnetwork->firstlayer->neurons] = trainingsample[i];
             }
 
@@ -683,8 +737,6 @@ void NeuralNetworkTraining() {
     }
 
     federatedlearninginstance->trainingscounter =  federatedlearninginstance->neuralnetwork->epoch * federatedlearninginstance->neuralnetwork->percentualtraining;
-
-    //fclose(arquivo);
 }
 
 //////////////////////////////////////////////////FEDERATEDLEARNING//////////////////////////////////////////////////
@@ -719,7 +771,7 @@ void readCSVFile() {
   char line[1024];
 
 
-    file = fopen("/storage/dataset.csv", "r");
+    file = fopen(DATA_PATH, "r");
 
     if (file == NULL) {
         LOG_ERR("Erro ao abrir o arquivo");
@@ -741,7 +793,7 @@ void readCSVFile() {
             }
         }
 
-      printf("InputData: [%.1f, %.1f, %.1f, %.1f, %.1f, %.1f, %.1f]\n", trainingsample[0], trainingsample[1], trainingsample[2], trainingsample[3], trainingsample[4], trainingsample[5], trainingsample[6]);
+      //printf("InputData: [%.1f, %.1f, %.1f, %.1f, %.1f, %.1f, %.1f]\n", trainingsample[0], trainingsample[1], trainingsample[2], trainingsample[3], trainingsample[4], trainingsample[5], trainingsample[6]);
 
 
   }

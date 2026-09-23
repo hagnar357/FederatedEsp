@@ -16,6 +16,8 @@ struct ThreadArgs {
 
 int main() {
 
+    setbuf(stdout, NULL);
+
     FederatedLearning *FDI =  getFederatedLearningInstance();
     setFederatedLearningGlobalModel();
     //PerformanceMetrics(30,0.5);

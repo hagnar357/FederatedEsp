@@ -23,13 +23,15 @@ extern struct k_sem wifi_connected_sem;
 
 
 // Configs para o Websocket
-#define WS_SERVER_IP SERVER_IP
+#define WS_SERVER_IP "192.168.1.195"
 #define WS_SERVER_PORT 8080
 #define WS_SERVER_PATH "/"
-//#define WEBSOCKET_SERVER "ws://"IP":8080/"
 
+// Training
+#define DATA_PATH "/storage/dataset.csv"
 
-
+//buffer de leitura dados
+#define READ_BUFFER_SIZE 1024
 
 // Funções de inicialização restantes
 void WIFIConfiguration(void);

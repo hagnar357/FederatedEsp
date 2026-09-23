@@ -11,11 +11,13 @@
 
 void handle_root_request(int client_socket){
     const char *response = "HTTP/1.1 404 Not Found\nContent-Type: text/plain\n\nFile Not Found";
+    printf("File not found on socket: %d", client_socket);
     write(client_socket, response, strlen(response));
 }
 
 void handle_not_found_request(int client_socket) {
     const char *not_found_response = "HTTP/1.1 404 Not Found\nContent-Type: text/plain\n\n404 Not Found";
+    printf("404 on socket: %d", client_socket);
     write(client_socket, not_found_response, strlen(not_found_response));
 }
 

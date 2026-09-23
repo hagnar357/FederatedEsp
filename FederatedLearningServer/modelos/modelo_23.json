@@ -1,0 +1,95 @@
+{
+	"globalmodelstatus":	0,
+	"trainingscounter":	0,
+	"neuralnetwork":	{
+		"epoch":	10,
+		"alpha":	0.0010000000474974513,
+		"regularization":	2,
+		"lambda":	0.00999999977648258,
+		"percentualtraining":	40,
+		"lossfunctiontype":	2,
+		"layers":	4,
+		"layersArray":	[{
+				"activationfunctiontype":	0,
+				"neurons":	4,
+				"neuronsArray":	[{
+						"neurontype":	"INPUT",
+						"weights":	0,
+						"bias":	0,
+						"weightsArray":	[]
+					}, {
+						"neurontype":	"INPUT",
+						"weights":	0,
+						"bias":	0,
+						"weightsArray":	[]
+					}, {
+						"neurontype":	"INPUT",
+						"weights":	0,
+						"bias":	0,
+						"weightsArray":	[]
+					}, {
+						"neurontype":	"INPUT",
+						"weights":	0,
+						"bias":	0,
+						"weightsArray":	[]
+					}]
+			}, {
+				"activationfunctiontype":	2,
+				"neurons":	3,
+				"neuronsArray":	[{
+						"neurontype":	"HIDDEN",
+						"weights":	4,
+						"bias":	0.12318629026412964,
+						"weightsArray":	[1.0228161811828613, 0.73969399929046631, 0.67004281282424927, 0.31284010410308838]
+					}, {
+						"neurontype":	"HIDDEN",
+						"weights":	4,
+						"bias":	-0.26162922382354736,
+						"weightsArray":	[-0.19414116442203522, -0.415380209684372, 1.4644681215286255, 0.76517903804779053]
+					}, {
+						"neurontype":	"HIDDEN",
+						"weights":	4,
+						"bias":	0.0671762004494667,
+						"weightsArray":	[0.36576411128044128, 0.60019993782043457, 0.81317234039306641, 0.536227822303772]
+					}]
+			}, {
+				"activationfunctiontype":	2,
+				"neurons":	3,
+				"neuronsArray":	[{
+						"neurontype":	"HIDDEN",
+						"weights":	3,
+						"bias":	0.12144777923822403,
+						"weightsArray":	[0.34992644190788269, -0.017298083752393723, 0.49847087264060974]
+					}, {
+						"neurontype":	"HIDDEN",
+						"weights":	3,
+						"bias":	-0.32775542140007019,
+						"weightsArray":	[-0.1846175342798233, 1.6099257469177246, 0.383531242609024]
+					}, {
+						"neurontype":	"HIDDEN",
+						"weights":	3,
+						"bias":	0.1027645543217659,
+						"weightsArray":	[0.917055368423462, 0.13462089002132416, 0.783487856388092]
+					}]
+			}, {
+				"activationfunctiontype":	4,
+				"neurons":	3,
+				"neuronsArray":	[{
+						"neurontype":	"OUTPUT",
+						"weights":	3,
+						"bias":	0.32316368818283081,
+						"weightsArray":	[0.5705382227897644, -0.767557144165039, 0.854331076145172]
+					}, {
+						"neurontype":	"OUTPUT",
+						"weights":	3,
+						"bias":	-0.081501476466655731,
+						"weightsArray":	[0.44046869874000549, 0.40921947360038757, 0.63836038112640381]
+					}, {
+						"neurontype":	"OUTPUT",
+						"weights":	3,
+						"bias":	-0.24737066030502319,
+						"weightsArray":	[0.0817534103989601, 1.5045900344848633, 0.1808348149061203]
+					}]
+			}]
+	}
+}

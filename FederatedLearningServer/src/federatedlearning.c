@@ -5,6 +5,7 @@
 #include <math.h>
 #include <time.h>
 #include <string.h>
+#include "configs.h"
 
 static pthread_mutex_t singletonMutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -631,21 +632,21 @@ void setFederatedLearningGlobalModel() {
 
   InitializeNeuralNetWork(federatedLearningInstance->neuralnetwork, 4 ,layerconfig0, CATEGORICAL_CROSS_ENTROPY,WEIGHT_VALUE_RANDOM);
   
-  federatedLearningInstance->neuralnetwork->percentualtraining = 40;
-  federatedLearningInstance->neuralnetwork->epoch = 8;
-  federatedLearningInstance->neuralnetwork->alpha=0.001;
+  federatedLearningInstance->neuralnetwork->percentualtraining = TRAINING_SAMPLES;
+  federatedLearningInstance->neuralnetwork->epoch = EPOCHS;
+  federatedLearningInstance->neuralnetwork->alpha=ALPHA;
   federatedLearningInstance->neuralnetwork->regularization=L2;
-  federatedLearningInstance->neuralnetwork->lambda =0.01;
+  federatedLearningInstance->neuralnetwork->lambda =LAMBDA;
 
-  federatedLearningInstance->nodecontrol->interactioncycle=12;
-  federatedLearningInstance->nodecontrol->clientnodes=1;
+  federatedLearningInstance->nodecontrol->interactioncycle=ITERATIONS;
+  federatedLearningInstance->nodecontrol->clientnodes=CLIENTS_NUM;
   federatedLearningInstance->nodecontrol->clientnodesregistered=0;
-  InitializeNeuralNetWork(federatedLearningInstance->nodecontrol->neuralnetwork, 4 ,layerconfig0, CATEGORICAL_CROSS_ENTROPY,WEIGHT_VALUE_ZERO);
-  federatedLearningInstance->nodecontrol->neuralnetwork->alpha=0.001;
-  federatedLearningInstance->nodecontrol->neuralnetwork->epoch = 8;
+  InitializeNeuralNetWork(federatedLearningInstance->nodecontrol->neuralnetwork, 4 ,layerconfig0, CATEGORICAL_CROSS_ENTROPY,WEIGHT_VALUE_RANDOM);
+  federatedLearningInstance->nodecontrol->neuralnetwork->alpha=ALPHA;
+  federatedLearningInstance->nodecontrol->neuralnetwork->epoch = EPOCHS;
   federatedLearningInstance->nodecontrol->neuralnetwork->regularization=L2;
-  federatedLearningInstance->nodecontrol->neuralnetwork->lambda =0.01;
-  federatedLearningInstance->nodecontrol->neuralnetwork->percentualtraining = 40;
+  federatedLearningInstance->nodecontrol->neuralnetwork->lambda =LAMBDA;
+  federatedLearningInstance->nodecontrol->neuralnetwork->percentualtraining = TRAINING_SAMPLES;
 
   federatedLearningInstance->globalmodelstatus=0;
 
@@ -722,6 +723,29 @@ void SetNeuralNetworkZeroWeightValue(NeuralNetwork *globalneuralnetwork){
   }
 }
 
+void SaveModel(int interaction){
+
+  FederatedLearning *instance = getFederatedLearningInstance();
+
+  cJSON *json = FederatedLearningToJSON(instance);
+  char *jsonstring = cJSON_Print(json);
+
+  char filename[64];
+  snprintf(filename, sizeof(filename), "modelos/modelo_%d.json", interaction);
+
+  FILE *modelfile = fopen(filename, "w");
+  if (modelfile != NULL) {
+    fprintf(modelfile, "%s", jsonstring);
+    fclose(modelfile);
+    printf("Model saved: %s\n", filename);
+  } else {
+    perror("Erro ao salvar o modelo");
+  }
+
+  cJSON_Delete(json);
+  free(jsonstring);
+}
+
 void AggregationModel(FederatedLearning * clientmodel){
 
 
@@ -767,8 +791,9 @@ void AggregationModel(FederatedLearning * clientmodel){
 
   // set 0 the neural network
   SetNeuralNetworkZeroWeightValue(federatedlearninginstance->nodecontrol->neuralnetwork);
-  PerformanceMetrics(federatedlearninginstance->neuralnetwork,30,0.5);
+  PerformanceMetrics(federatedlearninginstance->neuralnetwork,30,0.5,federatedlearninginstance->nodecontrol->clientnodes);
   federatedlearninginstance->nodecontrol->currentinteraction++;
+  SaveModel(federatedlearninginstance->nodecontrol->currentinteraction);
   federatedlearninginstance->globalmodelstatus=1;
 
 }
@@ -796,18 +821,19 @@ float F1Score(int truepositive,int falsepositive,int falsenegative){
                   Recall(truepositive,falsenegative));
 }
 
-void PerformanceMetrics(NeuralNetwork * neuralnetwork,int PercentualEvaluation,float Threshold){
+void PerformanceMetrics(NeuralNetwork * neuralnetwork,int PercentualEvaluation,float Threshold, int clientnodes){
   
   float trainingsample[neuralnetwork->firstlayer->neurons + neuralnetwork->lastlayer->neurons];
   float label[neuralnetwork->lastlayer->neurons];
   int total=0,truepositive=0,falsepositive=0,truenegative=0,falsenegative=0;
+  float totalloss=0;
   Layer * currentlayer = neuralnetwork -> firstlayer;
   Neuron * currentneuron = currentlayer -> firstneuron;
 
   FILE * file = NULL;
   char line[1024];
 
-  file = fopen("datasetevaluation.csv", "r");
+  file = fopen("data/datasetevaluation.csv", "r");
 
   if (file == NULL) {
     perror("Erro ao abrir o arquivo");
@@ -845,6 +871,7 @@ void PerformanceMetrics(NeuralNetwork * neuralnetwork,int PercentualEvaluation,f
         }
 
       FeedFoward(neuralnetwork);
+      totalloss += LossFunctionCalculation(neuralnetwork, label, neuralnetwork->regularization, neuralnetwork->lambda);
 
       currentneuron = neuralnetwork->lastlayer->firstneuron;
 
@@ -871,12 +898,39 @@ void PerformanceMetrics(NeuralNetwork * neuralnetwork,int PercentualEvaluation,f
   }
 
   fclose(file);
+  float avgloss = totalloss / PercentualEvaluation;
   printf("total = %d, TP = %d, TN = %d, FP = %d, FN = %d\n",total,truepositive,truenegative,falsepositive,falsenegative);
+  printf("Loss: %.4f\n",avgloss);
   printf("Accuracy: %.2f\n",Accuracy(truepositive,truenegative,falsepositive,falsenegative));
   printf("Precision: %.2f\n",Precision(truepositive,falsepositive));
   printf("Recall: %.2f\n",Recall(truepositive,falsenegative));
   printf("Specificity: %.2f\n",Specificity(truenegative,falsepositive));
   printf("F1-Score: %.2f\n",F1Score(truepositive,falsepositive,falsenegative));
 
+  FederatedLearning *instance = getFederatedLearningInstance();
+  int interaction = instance->nodecontrol->currentinteraction;
+
+  FILE *metricsfile = fopen("resultados/metrics.csv", "a");
+  if (metricsfile != NULL) {
+    if (ftell(metricsfile) == 0) {
+      fprintf(metricsfile, "interaction,nodes,loss,accuracy,precision,recall,specificity,f1score,TP,TN,FP,FN\n");
+    }
+    fprintf(metricsfile, "%d,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%d,%d,%d\n",
+      interaction,
+      clientnodes,
+      avgloss,
+      Accuracy(truepositive,truenegative,falsepositive,falsenegative),
+      Precision(truepositive,falsepositive),
+      Recall(truepositive,falsenegative),
+      Specificity(truenegative,falsepositive),
+      F1Score(truepositive,falsepositive,falsenegative),
+      truepositive,
+      truenegative,
+      falsepositive,
+      falsenegative
+      );
+
+    fclose(metricsfile);
+  }
 
 }

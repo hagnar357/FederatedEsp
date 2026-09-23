@@ -1,0 +1,436 @@
+./FederatedLearningServer
+Neural Network Compiled!
+{
+	"globalmodelstatus":	0,
+	"trainingscounter":	0,
+	"neuralnetwork":	{
+		"epoch":	10,
+		"alpha":	0.0010000000474974513,
+		"regularization":	2,
+		"lambda":	0.00999999977648258,
+		"percentualtraining":	40,
+		"lossfunctiontype":	2,
+		"layers":	4,
+		"layersArray":	[{
+				"activationfunctiontype":	0,
+				"neurons":	4,
+				"neuronsArray":	[{
+						"neurontype":	"INPUT",
+						"weights":	0,
+						"bias":	0,
+						"weightsArray":	[]
+					}, {
+						"neurontype":	"INPUT",
+						"weights":	0,
+						"bias":	0,
+						"weightsArray":	[]
+					}, {
+						"neurontype":	"INPUT",
+						"weights":	0,
+						"bias":	0,
+						"weightsArray":	[]
+					}, {
+						"neurontype":	"INPUT",
+						"weights":	0,
+						"bias":	0,
+						"weightsArray":	[]
+					}]
+			}, {
+				"activationfunctiontype":	2,
+				"neurons":	3,
+				"neuronsArray":	[{
+						"neurontype":	"HIDDEN",
+						"weights":	4,
+						"bias":	0,
+						"weightsArray":	[0.82999998331069946, 0.550000011920929, 0.990000009536743, 0.56999999284744263]
+					}, {
+						"neurontype":	"HIDDEN",
+						"weights":	4,
+						"bias":	0,
+						"weightsArray":	[0.40000000596046448, 0.36000001430511475, 0.82999998331069946, 0.270000010728836]
+					}, {
+						"neurontype":	"HIDDEN",
+						"weights":	4,
+						"bias":	0,
+						"weightsArray":	[0.119999997317791, 0.56999999284744263, 0.93999999761581421, 0.68999999761581421]
+					}]
+			}, {
+				"activationfunctiontype":	2,
+				"neurons":	3,
+				"neuronsArray":	[{
+						"neurontype":	"HIDDEN",
+						"weights":	3,
+						"bias":	0,
+						"weightsArray":	[0.10000000149011612, 0.239999994635582, 0.600000023841858]
+					}, {
+						"neurontype":	"HIDDEN",
+						"weights":	3,
+						"bias":	0,
+						"weightsArray":	[0.070000000298023224, 0.5899999737739563, 0.0900000035762787]
+					}, {
+						"neurontype":	"HIDDEN",
+						"weights":	3,
+						"bias":	0,
+						"weightsArray":	[0.68000000715255737, 0.31000000238418579, 0.81000000238418579]
+					}]
+			}, {
+				"activationfunctiontype":	4,
+				"neurons":	3,
+				"neuronsArray":	[{
+						"neurontype":	"OUTPUT",
+						"weights":	3,
+						"bias":	0,
+						"weightsArray":	[0.76999998092651367, 0.0900000035762787, 0.9100000262260437]
+					}, {
+						"neurontype":	"OUTPUT",
+						"weights":	3,
+						"bias":	0,
+						"weightsArray":	[0.52999997138977051, 0.41999998688697815, 0.850000023841858]
+					}, {
+						"neurontype":	"OUTPUT",
+						"weights":	3,
+						"bias":	0,
+						"weightsArray":	[0.12999999523162842, 0.990000009536743, 0.43000000715255737]
+					}]
+			}]
+	}
+}
+HTTP Server running in http://192.168.1.195:8888/
+WebSocket Server running in ws://192.168.1.195:8080
+Client IP: 192.168.1.188
+First client node Added
+client nodes registered 1 client nodes 2
+Global Model Status 0
+Client IP: 192.168.1.84
+Client node Added
+client nodes registered 2 client nodes 2
+Global Model Status 1
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Client IP: 192.168.1.188
+Node limit reached
+client nodes registered 2 client nodes 2
+Global Model Status 1
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Calculating the new global modeltotal = 90, TP = 3, TN = 37, FP = 27, FN = 23
+Loss: 1.8955
+Accuracy: 0.44
+Precision: 0.10
+Recall: 0.12
+Specificity: 0.58
+F1-Score: 0.11
+Model saved: modelos/modelo_1.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Calculating the new global modeltotal = 90, TP = 0, TN = 57, FP = 30, FN = 3
+Loss: 1.6289
+Accuracy: 0.63
+Precision: 0.00
+Recall: 0.00
+Specificity: 0.66
+F1-Score: -nan
+Model saved: modelos/modelo_2.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Calculating the new global modeltotal = 90, TP = 7, TN = 60, FP = 23, FN = 0
+Loss: 1.5799
+Accuracy: 0.74
+Precision: 0.23
+Recall: 1.00
+Specificity: 0.72
+F1-Score: 0.38
+Model saved: modelos/modelo_3.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Calculating the new global modeltotal = 90, TP = 2, TN = 60, FP = 28, FN = 0
+Loss: 1.0917
+Accuracy: 0.69
+Precision: 0.07
+Recall: 1.00
+Specificity: 0.68
+F1-Score: 0.12
+Model saved: modelos/modelo_4.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Calculating the new global modeltotal = 90, TP = 10, TN = 40, FP = 20, FN = 20
+Loss: 3.1024
+Accuracy: 0.56
+Precision: 0.33
+Recall: 0.33
+Specificity: 0.67
+F1-Score: 0.33
+Model saved: modelos/modelo_5.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Calculating the new global modeltotal = 90, TP = 20, TN = 50, FP = 10, FN = 10
+Loss: 1.3883
+Accuracy: 0.78
+Precision: 0.67
+Recall: 0.67
+Specificity: 0.83
+F1-Score: 0.67
+Model saved: modelos/modelo_6.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Calculating the new global modeltotal = 90, TP = 20, TN = 50, FP = 10, FN = 10
+Loss: 1.0409
+Accuracy: 0.78
+Precision: 0.67
+Recall: 0.67
+Specificity: 0.83
+F1-Score: 0.67
+Model saved: modelos/modelo_7.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Calculating the new global modeltotal = 90, TP = 21, TN = 52, FP = 9, FN = 8
+Loss: 0.6750
+Accuracy: 0.81
+Precision: 0.70
+Recall: 0.72
+Specificity: 0.85
+F1-Score: 0.71
+Model saved: modelos/modelo_8.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Calculating the new global modeltotal = 90, TP = 20, TN = 50, FP = 10, FN = 10
+Loss: 2.1516
+Accuracy: 0.78
+Precision: 0.67
+Recall: 0.67
+Specificity: 0.83
+F1-Score: 0.67
+Model saved: modelos/modelo_9.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Calculating the new global modeltotal = 90, TP = 20, TN = 50, FP = 10, FN = 10
+Loss: 0.8523
+Accuracy: 0.78
+Precision: 0.67
+Recall: 0.67
+Specificity: 0.83
+F1-Score: 0.67
+Model saved: modelos/modelo_10.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Calculating the new global modeltotal = 90, TP = 29, TN = 59, FP = 1, FN = 1
+Loss: 0.5726
+Accuracy: 0.98
+Precision: 0.97
+Recall: 0.97
+Specificity: 0.98
+F1-Score: 0.97
+Model saved: modelos/modelo_11.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Calculating the new global modeltotal = 90, TP = 20, TN = 50, FP = 10, FN = 10
+Loss: 1.9609
+Accuracy: 0.78
+Precision: 0.67
+Recall: 0.67
+Specificity: 0.83
+F1-Score: 0.67
+Model saved: modelos/modelo_12.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Calculating the new global modeltotal = 90, TP = 27, TN = 57, FP = 3, FN = 3
+Loss: 0.5511
+Accuracy: 0.93
+Precision: 0.90
+Recall: 0.90
+Specificity: 0.95
+F1-Score: 0.90
+Model saved: modelos/modelo_13.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Calculating the new global modeltotal = 90, TP = 20, TN = 50, FP = 10, FN = 10
+Loss: 1.9465
+Accuracy: 0.78
+Precision: 0.67
+Recall: 0.67
+Specificity: 0.83
+F1-Score: 0.67
+Model saved: modelos/modelo_14.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Calculating the new global modeltotal = 90, TP = 20, TN = 50, FP = 10, FN = 10
+Loss: 1.1540
+Accuracy: 0.78
+Precision: 0.67
+Recall: 0.67
+Specificity: 0.83
+F1-Score: 0.67
+Model saved: modelos/modelo_15.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Calculating the new global modeltotal = 90, TP = 17, TN = 47, FP = 13, FN = 13
+Loss: 0.8003
+Accuracy: 0.71
+Precision: 0.57
+Recall: 0.57
+Specificity: 0.78
+F1-Score: 0.57
+Model saved: modelos/modelo_16.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Calculating the new global modeltotal = 90, TP = 20, TN = 50, FP = 10, FN = 10
+Loss: 0.5884
+Accuracy: 0.78
+Precision: 0.67
+Recall: 0.67
+Specificity: 0.83
+F1-Score: 0.67
+Model saved: modelos/modelo_17.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Calculating the new global modeltotal = 90, TP = 20, TN = 50, FP = 10, FN = 10
+Loss: 0.5668
+Accuracy: 0.78
+Precision: 0.67
+Recall: 0.67
+Specificity: 0.83
+F1-Score: 0.67
+Model saved: modelos/modelo_18.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Calculating the new global modeltotal = 90, TP = 21, TN = 51, FP = 9, FN = 9
+Loss: 0.5429
+Accuracy: 0.80
+Precision: 0.70
+Recall: 0.70
+Specificity: 0.85
+F1-Score: 0.70
+Model saved: modelos/modelo_19.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Recebeu wsjson not nullRecebeu wsjson not nullAggregating Local Model 192.168.1.84
+Calculating the new global modeltotal = 90, TP = 22, TN = 52, FP = 8, FN = 8
+Loss: 0.5187
+Accuracy: 0.82
+Precision: 0.73
+Recall: 0.73
+Specificity: 0.87
+F1-Score: 0.73
+Model saved: modelos/modelo_20.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Calculating the new global modeltotal = 90, TP = 20, TN = 50, FP = 10, FN = 10
+Loss: 0.7803
+Accuracy: 0.78
+Precision: 0.67
+Recall: 0.67
+Specificity: 0.83
+F1-Score: 0.67
+Model saved: modelos/modelo_21.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Calculating the new global modeltotal = 90, TP = 20, TN = 51, FP = 10, FN = 9
+Loss: 0.6184
+Accuracy: 0.79
+Precision: 0.67
+Recall: 0.69
+Specificity: 0.84
+F1-Score: 0.68
+Model saved: modelos/modelo_22.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Calculating the new global modeltotal = 90, TP = 27, TN = 57, FP = 3, FN = 3
+Loss: 0.4247
+Accuracy: 0.93
+Precision: 0.90
+Recall: 0.90
+Specificity: 0.95
+F1-Score: 0.90
+Model saved: modelos/modelo_23.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Calculating the new global modeltotal = 90, TP = 27, TN = 57, FP = 3, FN = 3
+Loss: 0.4163
+Accuracy: 0.93
+Precision: 0.90
+Recall: 0.90
+Specificity: 0.95
+F1-Score: 0.90
+Model saved: modelos/modelo_24.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Calculating the new global modeltotal = 90, TP = 27, TN = 57, FP = 3, FN = 3
+Loss: 0.4050
+Accuracy: 0.93
+Precision: 0.90
+Recall: 0.90
+Specificity: 0.95
+F1-Score: 0.90
+Model saved: modelos/modelo_25.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Calculating the new global modeltotal = 90, TP = 29, TN = 59, FP = 1, FN = 1
+Loss: 0.3941
+Accuracy: 0.98
+Precision: 0.97
+Recall: 0.97
+Specificity: 0.98
+F1-Score: 0.97
+Model saved: modelos/modelo_26.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Calculating the new global modeltotal = 90, TP = 29, TN = 59, FP = 1, FN = 1
+Loss: 0.3830
+Accuracy: 0.98
+Precision: 0.97
+Recall: 0.97
+Specificity: 0.98
+F1-Score: 0.97
+Model saved: modelos/modelo_27.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Calculating the new global modeltotal = 90, TP = 29, TN = 59, FP = 1, FN = 1
+Loss: 0.3733
+Accuracy: 0.98
+Precision: 0.97
+Recall: 0.97
+Specificity: 0.98
+F1-Score: 0.97
+Model saved: modelos/modelo_28.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Calculating the new global modeltotal = 90, TP = 29, TN = 59, FP = 1, FN = 1
+Loss: 0.3642
+Accuracy: 0.98
+Precision: 0.97
+Recall: 0.97
+Specificity: 0.98
+F1-Score: 0.97
+Model saved: modelos/modelo_29.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Calculating the new global modeltotal = 90, TP = 29, TN = 59, FP = 1, FN = 1
+Loss: 0.3562
+Accuracy: 0.98
+Precision: 0.97
+Recall: 0.97
+Specificity: 0.98
+F1-Score: 0.97
+Model saved: modelos/modelo_30.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Calculating the new global modeltotal = 90, TP = 22, TN = 52, FP = 8, FN = 8
+Loss: 0.5296
+Accuracy: 0.82
+Precision: 0.73
+Recall: 0.73
+Specificity: 0.87
+F1-Score: 0.73
+Model saved: modelos/modelo_31.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+Calculating the new global modeltotal = 90, TP = 27, TN = 57, FP = 3, FN = 3
+Loss: 0.4626
+Accuracy: 0.93
+Precision: 0.90
+Recall: 0.90
+Specificity: 0.95
+F1-Score: 0.90
+Model saved: modelos/modelo_32.json
+Recebeu wsjson not nullAggregating Local Model 192.168.1.188
+The application reached the max interation
+Recebeu wsjson not nullAggregating Local Model 192.168.1.84
+The application reached the max interation
+make: *** [Makefile:34: run] Interrupção

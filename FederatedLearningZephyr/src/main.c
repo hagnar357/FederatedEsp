@@ -54,68 +54,110 @@ void brink_error_led(int blink){
     }
 }
 
+#define GLOBAL_MODEL_MAX_ATTEMPTS 5
+#define SEND_MODEL_MAX_ATTEMPTS 3
+
 void node_register(){
     // gpio_set_level(LED_PIN_SYNC, 1);
-    getregisternode();
-    k_msleep(100);
+    // repete até o servidor confirmar o registro (novo ou já existente)
+    while (!getregisternode()) {
+        printf("Registro falhou, tentando novamente...\n");
+        brink_error_led(1);
+        k_msleep(2000);
+        wifi_wait_connected();
+    }
     // gpio_set_level(LED_PIN_SYNC, 0);
 }
 
-int global_model_status(){
+int global_model_status(int *round){
     int status=0;
     // gpio_set_level(LED_PIN_SYNC, 1);
-    status=getglobalmodelstatus();
+    status=getglobalmodelstatus(round);
     k_msleep(50);
     // gpio_set_level(LED_PIN_SYNC, 0);
     k_msleep(50);
     return status;
 }
 
+// Tentativas limitadas com backoff; retorna NULL e o loop volta a checar o status
 FederatedLearning *global_model(){
-    // gpio_set_level(LED_PIN_SYNC, 1);
-    FederatedLearning *globalmodelinstance = getglobalmodel();
-    // gpio_set_level(LED_PIN_SYNC, 0);
-    if(globalmodelinstance==NULL){
-        while (globalmodelinstance==NULL){
-            printf("Json null\n");
-            brink_error_led(2);
-            // gpio_set_level(LED_PIN_SYNC, 1);
-            globalmodelinstance = getglobalmodel();     
-            // gpio_set_level(LED_PIN_SYNC, 0);
-        }
-    }else{
+    for (int attempt = 1; attempt <= GLOBAL_MODEL_MAX_ATTEMPTS; attempt++) {
+        // gpio_set_level(LED_PIN_SYNC, 1);
+        FederatedLearning *globalmodelinstance = getglobalmodel();
+        // gpio_set_level(LED_PIN_SYNC, 0);
+        if (globalmodelinstance != NULL) {
             printf("Json not null\n");
-        
+            return globalmodelinstance;
+        }
+        printf("Json null (tentativa %d)\n", attempt);
+        brink_error_led(2);
+        k_msleep(1000 * attempt);
     }
-    
-    return globalmodelinstance;
+    return NULL;
+}
+
+// Envia o modelo já treinado, sem retreinar, até SEND_MODEL_MAX_ATTEMPTS vezes
+int send_local_model(int round){
+    for (int attempt = 1; attempt <= SEND_MODEL_MAX_ATTEMPTS; attempt++) {
+        if (websocket_send_local_model(round) == 0) {
+            return 0;
+        }
+        printf("Envio do modelo falhou (tentativa %d)\n", attempt);
+        k_msleep(1000 * attempt);
+        wifi_wait_connected();
+    }
+    return -1;
 }
 
 void deep_learning(){
 
-    int ctrl=0;
+    // rodada do último modelo global treinado e enviado; evita treinar 2x a mesma rodada
+    int last_trained_round = -1;
 
     while (1){
-        if(global_model_status()){
-            replaceNeuralNetwork(global_model());
-            NeuralNetworkTraining();
-            websocket_send_local_model();
-        }else{
+        wifi_wait_connected();
+
+        int round = -1;
+        if(!global_model_status(&round) || round == last_trained_round){
             k_msleep(4000);
+            continue;
         }
-        ctrl++;
+
+        FederatedLearning *globalmodelinstance = global_model();
+        if (globalmodelinstance == NULL) {
+            continue;
+        }
+
+        replaceNeuralNetwork(globalmodelinstance);
+        NeuralNetworkTraining();
+
+        if (getFederatedLearningInstance()->trainingscounter <= 0) {
+            printf("Nada foi treinado, modelo não enviado\n");
+            brink_error_led(3);
+            k_msleep(4000);
+            continue;
+        }
+
+        if (send_local_model(round) == 0) {
+            last_trained_round = round;
+        }
     }
 }
 
 
 void deep_learning_test(){
-    if(global_model_status()){
+    int round = -1;
+    if(global_model_status(&round)){
         FederatedLearning *globalmodelinstance = getglobalmodel();
+        if (globalmodelinstance == NULL) {
+            return;
+        }
         printf("getmodel\n");
+        // replaceNeuralNetwork assume a posse do modelo recebido
         replaceNeuralNetwork(globalmodelinstance);
-        PrintNeuralNetwork(globalmodelinstance->neuralnetwork);
-        NeuralNetworkTraining();
         FederatedLearning *FDI = getFederatedLearningInstance();
+        PrintNeuralNetwork(FDI->neuralnetwork);
+        NeuralNetworkTraining();
         PrintNeuralNetwork(FDI->neuralnetwork);
     }
 }
@@ -152,13 +194,9 @@ int main(){
     printf("1");
     start_federated_learning_system_button();
 
-    // Tenta pegar a ficha. Se retornar 0, significa que pegou com sucesso!
-    if (k_sem_take(&wifi_connected_sem, K_SECONDS(15)) == 0) {
-        printf("Acesso liberado! Iniciando comunicacao com o servidor...\n");
-    } else {
-        printf("ERRO FATAL: Timeout. O roteador nao forneceu o IP.\n");
-        // Opcional: Você pode colocar um k_msleep aqui e reiniciar a placa (sys_reboot)
-    }
+    // Não segue sem IP: espera (com novas tentativas de conexão) até o roteador fornecer o endereço
+    wifi_wait_connected();
+    printf("Acesso liberado! Iniciando comunicacao com o servidor...\n");
     
     printf("enter noderegister\n");
     node_register();

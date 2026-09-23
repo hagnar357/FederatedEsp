@@ -176,8 +176,25 @@ float SigmoidDerivative(float a) {
   return a * (1 - a);
 }
 
-float SoftMax( float Z,float softmaxsum ){
-  return exp(Z)/softmaxsum;
+//numerically stable softmax: the neurons hold Z in activationfunctionvalue when called
+void SoftMaxLayer(Layer *layer){
+  Neuron *currentneuron = layer->firstneuron;
+  float maxZ = currentneuron->activationfunctionvalue;
+  for (currentneuron = layer->firstneuron; currentneuron != NULL; currentneuron = currentneuron->nextneuron) {
+    if (currentneuron->activationfunctionvalue > maxZ) {
+      maxZ = currentneuron->activationfunctionvalue;
+    }
+  }
+
+  float softmaxsum = 0;
+  for (currentneuron = layer->firstneuron; currentneuron != NULL; currentneuron = currentneuron->nextneuron) {
+    currentneuron->activationfunctionvalue = exp(currentneuron->activationfunctionvalue - maxZ);
+    softmaxsum += currentneuron->activationfunctionvalue;
+  }
+
+  for (currentneuron = layer->firstneuron; currentneuron != NULL; currentneuron = currentneuron->nextneuron) {
+    currentneuron->activationfunctionvalue /= softmaxsum;
+  }
 }
 
 float SoftMaxDerivative1(float a){
@@ -198,7 +215,7 @@ float CategoricalCrossEntropyDerivative(float y, float a) {
 float CategoricalCrossEntropy(float * label, float * output, int labelsize) {
   float sum = 0;
   for (int i = 0; i < labelsize; i++) {
-    sum += label[i] * log(output[i]);
+    sum += label[i] * log(fmaxf(output[i], 1e-7f));
   }
   return -sum;
 }
@@ -269,7 +286,7 @@ void freeFederatedLearning(FederatedLearning *federatedlearning){
     return;
   }
   freeNeuralNetwork(federatedlearning->neuralnetwork);
-
+  free(federatedlearning);
 }
 void freeVector(float *vector) {
     if (vector != NULL) {
@@ -290,51 +307,21 @@ void freeMatrix(float **matrix, int lines) {
 
 //////////////////////////////////////////////////DEEPLEARNINGNEURALNETWORK//////////////////////////////////////////////////
 
-float ActivationFunctionCalculaton(NeuralNetwork *neuralnetwork,float Z, int activationfunctiontype){
+float ActivationFunctionCalculaton(float Z, int activationfunctiontype){
 
   //printf("activaiton function type: %d",activationfunctiontype);
 
-  Layer *currentlayer;
-  Neuron *currentneuron, *previousneuron;
-  Weight *currentweight;
-
-  float sum = 0;
-  float softmaxsum=0;
-
 switch (activationfunctiontype)
 {
-case 1:
+case PERCEPTRON:
   return Perceptron(Z);
-case 2:
+case RELU:
   return ReLU(Z);
-case 3:
+case SIGMOID:
   return Sigmoid(Z); 
-case 4:
-
-      currentlayer = neuralnetwork->lastlayer;
-      currentneuron = currentlayer -> firstneuron;
-      previousneuron = currentlayer->previouslayer->firstneuron;
-
-      for (int i = 0; i < currentlayer -> neurons; i++) {
-        currentweight= currentneuron->firstweight;
-        //printf("wieghts %d \nB %f - ",currentneuron->weights,currentneuron->bias);
-        sum+= currentneuron->bias;
-        for (int j = 0;  j< currentneuron -> weights; j++) {
-          sum += currentweight->weight * previousneuron->activationfunctionvalue;
-          //printf("W %f IN %f - ",currentweight->weight,previousneuron->activationfunctionvalue,Z);
-          currentweight =currentweight->nextweight;
-          previousneuron = previousneuron ->nextneuron;
-        }
-        softmaxsum += exp(sum);
-
-        sum = 0;
-        currentneuron = currentneuron -> nextneuron;
-        previousneuron = currentlayer->previouslayer->firstneuron;
-      }
-      //printf("Exp Z %f SOFTMAXSUM += %f\n",exp(Z),softmaxsum);
-
-      return SoftMax(Z,softmaxsum);
-
+case SOFTMAX:
+  //keeps Z, the whole layer is normalized by SoftMaxLayer
+  return Z;
 default:
   return 0;
 }
@@ -369,16 +356,13 @@ float StochasticGradientDescentCalculation( float weight,float output ,float del
       //printf("REGULATION 1 ");
 
       if(weight >0){
-        return -alpha * (deltafunction * output + 1);
-
+        return -alpha * (deltafunction * output + lambda);
       }
       else if(weight==0){
-        return -alpha * (deltafunction * output + 0);
-
+        return -alpha * (deltafunction * output);
       }
       else{
-        return -alpha * (deltafunction * output -1);
-        
+        return -alpha * (deltafunction * output - lambda);
       }
     case 2:
       //printf("REGULATION 2 ");
@@ -514,12 +498,15 @@ void FeedFoward(NeuralNetwork * neuralnetwork){
           currentweight =currentweight->nextweight;
           previousneuron = previousneuron ->nextneuron;
         }
-        currentneuron -> activationfunctionvalue =  ActivationFunctionCalculaton(neuralnetwork,Z,currentlayer->activationfunctiontype);
+        currentneuron -> activationfunctionvalue =  ActivationFunctionCalculaton(Z,currentlayer->activationfunctiontype);
         //printf("Z %f ATIVACAO %f\n",Z,currentneuron -> activationfunctionvalue);
         Z = 0;
         currentneuron = currentneuron -> nextneuron;
         previousneuron = currentlayer->previouslayer->firstneuron;
       }
+    if (currentlayer->activationfunctiontype == SOFTMAX) {
+      SoftMaxLayer(currentlayer);
+    }
     currentlayer = currentlayer -> nextlayer;
     }
 }
@@ -578,9 +565,10 @@ void BackPropagation(NeuralNetwork *neuralnetwork, float *label, float alpha, in
         for(int j=0;j<currentlayer->previouslayer->neurons ;j++){
           //printf("W %f A %f ",currentweight->weight,previousneuron->activationfunctionvalue);
           //currentweight->weight +=  - deltafunctions[i] * previousneuron->activationfunctionvalue * alpha; 
+          //the delta of the previous layer uses the weight before the update
+          weights[j][i] = currentweight -> weight;
           currentweight->weight += StochasticGradientDescentCalculation(currentweight->weight,previousneuron->activationfunctionvalue,deltafunctions[i],regularization,alpha,lambda);
           //printf("D %f Wn %f\n",deltafunctions[i],currentweight->weight);
-          weights[j][i] = currentweight -> weight;
           previousneuron =previousneuron->nextneuron;
           currentweight = currentweight->nextweight;
         }
@@ -593,7 +581,7 @@ void BackPropagation(NeuralNetwork *neuralnetwork, float *label, float alpha, in
       //printf("layer %d \n",layer);
       float * deltafunctionsaux = (float * ) malloc(deltafunctionsnumber * sizeof(float));
       memcpy(deltafunctionsaux, deltafunctions, deltafunctionsnumber * sizeof(float));
-      deltafunctions = (float * ) realloc(deltafunctions, currentlayer->neurons * sizeof(int));
+      deltafunctions = (float * ) realloc(deltafunctions, currentlayer->neurons * sizeof(float));
           
       float deltafunctionaccumulation;
 
@@ -633,9 +621,10 @@ void BackPropagation(NeuralNetwork *neuralnetwork, float *label, float alpha, in
         previousneuron = currentlayer->previouslayer->firstneuron;
         for (int j = 0; j < currentneuron->weights; j++){
           //printf("W %f D %f A %f GW %f",currentweight->weight,deltafunctions[i],previousneuron->activationfunctionvalue,- deltafunctions[i]*previousneuron->activationfunctionvalue*LearningRate);
+          //the delta of the previous layer uses the weight before the update
+          weights[j][i] = currentweight->weight;
           currentweight->weight +=  StochasticGradientDescentCalculation(currentweight->weight,previousneuron->activationfunctionvalue,deltafunctions[i],regularization,alpha,lambda); 
           //currentweight->weight +=  - deltafunctions[i] * previousneuron->activationfunctionvalue * alpha; 
-          weights[j][i] = currentweight->weight;
           //printf(" Wn %f \n",currentweight->weight);
           currentweight = currentweight->nextweight;
           previousneuron = previousneuron->nextneuron;
@@ -658,9 +647,19 @@ void NeuralNetworkTraining() {
   FederatedLearning *federatedlearninginstance = getFederatedLearningInstance();
   NeuralNetwork * neuralnetwork = federatedlearninginstance->neuralnetwork;
 
-  float trainingsample[neuralnetwork->firstlayer->neurons + neuralnetwork->lastlayer->neurons];
+  // trainingscounter stays 0 if nothing is trained, so the model is not sent
+  federatedlearninginstance->trainingscounter = 0;
+
+  if (neuralnetwork == NULL) {
+      LOG_ERR("Sem modelo global para treinar.");
+      return;
+  }
+
+  int num_data = neuralnetwork->firstlayer->neurons + neuralnetwork->lastlayer->neurons;
+  float trainingsample[num_data];
   float label[neuralnetwork->lastlayer->neurons];
   float Error = 0.0;
+  int trainedsamples = 0;
 
   char line[1024];
   Neuron * currentneuron = NULL;
@@ -672,8 +671,7 @@ void NeuralNetworkTraining() {
       return;
   }
   
-  // 2. Define o limite de instâncias para treinamento baseado na proporção desejada
-  // Supondo que você queira usar uma porcentagem das instâncias (ex: 80%)
+  // 2. Usa todas as instâncias do dataset local no treinamento
   neuralnetwork->percentualtraining = (int)total_instancias;
   
   LOG_INF("Iniciando treino. Instâncias no Dataset: %d",neuralnetwork->percentualtraining);
@@ -688,29 +686,35 @@ void NeuralNetworkTraining() {
 
         if (rc < 0) {
             LOG_ERR("Erro %d ao abrir o arquivo CSV.", rc);
+            federatedlearninginstance->trainingscounter = 0;
             return;
         }
+
+        int invalidlines = 0;
+        float epochloss = 0;
+        int epochsamples = 0;
 
         for(int count = 0; count < neuralnetwork->percentualtraining; count++){
           
             // 2. Lê a linha usando o nosso fgets customizado
             if (zephyr_fgets(line, sizeof(line), &file) <= 0) {
                 // Se retornar 0 ou menos, o arquivo acabou ou deu erro de leitura
-                LOG_WRN("Fim do arquivo alcançado ou erro de leitura prematuro.");
                 break;
             }
 
-            int num_data = neuralnetwork->firstlayer->neurons + neuralnetwork->lastlayer->neurons;
             char * token = strtok(line, ","); 
+            int fields = 0;
 
-            for (int i = 0; i < num_data; i++){
-                if (token != NULL) {
-                  trainingsample[i] = strtof(token, NULL);
-                } else {
-                    LOG_ERR("Error: Not enough data in the line.\n");
-                    break;
-                }
+            for (int i = 0; i < num_data && token != NULL; i++){
+                trainingsample[i] = strtof(token, NULL);
+                fields++;
                 token = strtok(NULL, ",");
+            }
+
+            // linha vazia ou incompleta: não treina com valores da linha anterior
+            if (fields != num_data) {
+                invalidlines++;
+                continue;
             }
 
             //set the input data on inputdata vector
@@ -728,24 +732,35 @@ void NeuralNetworkTraining() {
             FeedFoward(neuralnetwork);
             Error = LossFunctionCalculation(neuralnetwork,label,neuralnetwork->regularization,neuralnetwork->lambda);
             BackPropagation(neuralnetwork,label,neuralnetwork->alpha,neuralnetwork->regularization,neuralnetwork->lambda);
+            epochloss += Error;
+            epochsamples++;
         }
 
         // 3. Fecha o arquivo usando a API do Zephyr
         fs_close(&file);
 
-        printf("Epoch %d Loss: %f\n", TrainingCycle+1, Error);
+        if (invalidlines > 0) {
+            LOG_WRN("Epoch %d: %d linhas inválidas ignoradas.", TrainingCycle+1, invalidlines);
+        }
+
+        trainedsamples += epochsamples;
+        printf("Epoch %d Loss: %f\n", TrainingCycle+1, epochsamples > 0 ? epochloss / epochsamples : 0);
     }
 
-    federatedlearninginstance->trainingscounter =  federatedlearninginstance->neuralnetwork->epoch * federatedlearninginstance->neuralnetwork->percentualtraining;
+    // peso do nó no FedAvg: amostras efetivamente treinadas em todas as épocas
+    federatedlearninginstance->trainingscounter = trainedsamples;
 }
 
 //////////////////////////////////////////////////FEDERATEDLEARNING//////////////////////////////////////////////////
 
+//takes ownership of the new model: the previous network and the received wrapper are released
 void replaceNeuralNetwork(FederatedLearning * newfederatedlearninginstance){
     FederatedLearning * federatedlearninginstance =  getFederatedLearningInstance();
-    memcpy(federatedlearninginstance->neuralnetwork, newfederatedlearninginstance->neuralnetwork, sizeof(NeuralNetwork));
+    freeNeuralNetwork(federatedlearninginstance->neuralnetwork);
+    federatedlearninginstance->neuralnetwork = newfederatedlearninginstance->neuralnetwork;
     federatedlearninginstance->trainingscounter=0;
-    //freeFederatedLearning(federatedlearninginstance);
+    newfederatedlearninginstance->neuralnetwork = NULL;
+    free(newfederatedlearninginstance);
 }
 
 void mergeNeuralNetwork(FederatedLearning * newfederatedlearninginstance){
@@ -754,48 +769,7 @@ void mergeNeuralNetwork(FederatedLearning * newfederatedlearninginstance){
 
 FederatedLearning *getFederatedLearningInstance() {
     
+    //the neural network stays NULL until the first global model is received
     static FederatedLearning instance;
-    if (instance.neuralnetwork == NULL) {
-        instance.neuralnetwork = (NeuralNetwork *)malloc(sizeof(NeuralNetwork));
-        instance.globalmodelstatus = 0;
-        instance.trainingscounter = 0;
-    }
     return &instance;
-}
-
-void readCSVFile() {
-
-  float trainingsample[7];
-
-  FILE * file = NULL;
-  char line[1024];
-
-
-    file = fopen(DATA_PATH, "r");
-
-    if (file == NULL) {
-        LOG_ERR("Erro ao abrir o arquivo");
-        return;
-    }
-
-    while (fgets(line, sizeof(line), file) != NULL) {
-
-
-        char * token = strtok(line, ","); 
-
-        for (int i = 0; i < 7; i++){
-            token = strtok(NULL, ",");
-            if (token != NULL) {
-              trainingsample[i] = strtof(token, NULL);
-            } else {
-            LOG_ERR("Erro: Não há dados suficientes para preencher InputData na linha.\n");
-            break;
-            }
-        }
-
-      //printf("InputData: [%.1f, %.1f, %.1f, %.1f, %.1f, %.1f, %.1f]\n", trainingsample[0], trainingsample[1], trainingsample[2], trainingsample[3], trainingsample[4], trainingsample[5], trainingsample[6]);
-
-
-  }
-
 }

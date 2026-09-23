@@ -11,7 +11,16 @@ ROOT_DIR=$(pwd)
 ZEPHYR_DIR="FederatedLearningZephyr"
 SERVER_DIR="FederatedLearningServer"
 
-LOG_DIR="log_run"
+# ID único da execução: logs, modelos e métricas vão para subpastas com esse nome
+BASE_RUN_ID="run_$(date +%Y%m%d_%H%M%S)"
+RUN_ID="$BASE_RUN_ID"
+n=1
+while [ -e "log_run/$RUN_ID" ] || [ -e "$SERVER_DIR/modelos/$RUN_ID" ] || [ -e "$SERVER_DIR/resultados/$RUN_ID" ]; do
+    RUN_ID="${BASE_RUN_ID}_$n"
+    n=$((n + 1))
+done
+
+LOG_DIR="log_run/$RUN_ID"
 CLIENT_LOG_DIR="$LOG_DIR/clients"
 
 mkdir -p "$LOG_DIR"
@@ -124,7 +133,7 @@ trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
 
 (
     cd "$SERVER_DIR"
-    make run > "../$LOG_DIR/server.log" 2>&1
+    RUN_ID="$RUN_ID" make run > "../$LOG_DIR/server.log" 2>&1
 ) &
 
 SERVER_PID=$!
@@ -185,6 +194,10 @@ done
 
 echo
 echo "Sistema iniciado."
+echo "Run: $RUN_ID"
+echo "  Logs:      $LOG_DIR"
+echo "  Modelos:   $SERVER_DIR/modelos/$RUN_ID"
+echo "  Métricas:  $SERVER_DIR/resultados/$RUN_ID"
 echo "Servidor PID: $SERVER_PID"
 echo "Monitores: ${MONITOR_PIDS[*]}"
 echo

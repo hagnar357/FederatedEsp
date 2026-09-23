@@ -3,6 +3,8 @@
 
 #include "../lib/cJSON.h"
 #include <pthread.h>
+#include <time.h>
+#include <netinet/in.h>
 
 //activation function
 #define PERCEPTRON 1
@@ -63,7 +65,7 @@ typedef struct NeuralNetwork {
 //////////
 
 typedef struct ClientNode{
-  char ip_id[15];
+  char ip_id[INET_ADDRSTRLEN];
   int interaction;
   struct ClientNode *previousclientnode, *nextclientnode;
 }ClientNode;
@@ -73,6 +75,8 @@ typedef struct NodeControl{
   int interactioncycle;
   int clientnodes;
   int clientnodesregistered;
+  int modelsreceived;
+  time_t roundstarttime;
   NeuralNetwork *neuralnetwork;
   struct ClientNode *firstclientnode, *lastclientnode;
 }NodeControl;
@@ -98,7 +102,14 @@ typedef struct LayerConfig{
 FederatedLearning *getFederatedLearningInstance();
 void PrintNeuralNeuralNetwork(NeuralNetwork * neuralnetwork);
 void setFederatedLearningGlobalModel();
-void AggregationModel(FederatedLearning * clientmodel);
+int AggregationModel(FederatedLearning * clientmodel, ClientNode * clientnode, int round);
+void CheckRoundTimeout();
 void PerformanceMetrics(NeuralNetwork * neuralnetwork,int PercentualEvaluation,float Threshold, int clientnodes);
 void SaveModel(int interaction);
+int InitRunOutput();
+void freeNeuralNetwork(NeuralNetwork *neuralnetwork);
+void freeFederatedLearningModel(FederatedLearning *federatedlearning);
+//protects the global state shared by the HTTP and WebSocket threads
+void FederatedLearningLock();
+void FederatedLearningUnlock();
 #endif

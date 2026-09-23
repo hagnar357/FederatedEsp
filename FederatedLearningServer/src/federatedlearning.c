@@ -5,9 +5,20 @@
 #include <math.h>
 #include <time.h>
 #include <string.h>
+#include <errno.h>
+#include <sys/stat.h>
 #include "configs.h"
 
 static pthread_mutex_t singletonMutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t flStateMutex = PTHREAD_MUTEX_INITIALIZER;
+
+void FederatedLearningLock(){
+  pthread_mutex_lock(&flStateMutex);
+}
+
+void FederatedLearningUnlock(){
+  pthread_mutex_unlock(&flStateMutex);
+}
 
 //////////////////////////////////////////////////PRINT//////////////////////////////////////////////////
 
@@ -190,7 +201,10 @@ void freeLayer(Layer *layer) {
 
 void freeNeuralNetwork(NeuralNetwork *neuralnetwork) {
       //printf("teste 0");
-    
+    if(neuralnetwork==NULL){
+        return;
+    }
+
     Layer *currentlayer = neuralnetwork->firstlayer;
 
     while (currentlayer != NULL) {
@@ -225,6 +239,14 @@ void freeNeuralNetwork(NeuralNetwork *neuralnetwork) {
     free(neuralnetwork);
 }
 
+void freeFederatedLearningModel(FederatedLearning *federatedlearning) {
+    if(federatedlearning==NULL){
+        return;
+    }
+    freeNeuralNetwork(federatedlearning->neuralnetwork);
+    free(federatedlearning);
+}
+
 //////////////////////////////////////////////////DEEPLEARNINGMATH//////////////////////////////////////////////////
 
 float Perceptron(float Z){
@@ -250,14 +272,31 @@ float Sigmoid(float Z) {
   return 1.0 / (1.0 + exp(-Z));
 }
 
-float SoftMax( float Z,float softmaxsum ){
-  return exp(Z)/softmaxsum;
+//numerically stable softmax: the neurons hold Z in activationfunctionvalue when called
+void SoftMaxLayer(Layer *layer){
+  Neuron *currentneuron = layer->firstneuron;
+  float maxZ = currentneuron->activationfunctionvalue;
+  for (currentneuron = layer->firstneuron; currentneuron != NULL; currentneuron = currentneuron->nextneuron) {
+    if (currentneuron->activationfunctionvalue > maxZ) {
+      maxZ = currentneuron->activationfunctionvalue;
+    }
+  }
+
+  float softmaxsum = 0;
+  for (currentneuron = layer->firstneuron; currentneuron != NULL; currentneuron = currentneuron->nextneuron) {
+    currentneuron->activationfunctionvalue = exp(currentneuron->activationfunctionvalue - maxZ);
+    softmaxsum += currentneuron->activationfunctionvalue;
+  }
+
+  for (currentneuron = layer->firstneuron; currentneuron != NULL; currentneuron = currentneuron->nextneuron) {
+    currentneuron->activationfunctionvalue /= softmaxsum;
+  }
 }
 
 float CategoricalCrossEntropy(float * label, float * output, int labelsize) {
   float sum = 0;
   for (int i = 0; i < labelsize; i++) {
-    sum += label[i] * log(output[i]);
+    sum += label[i] * log(fmaxf(output[i], 1e-7f));
   }
   return -sum;
 }
@@ -367,50 +406,20 @@ float LossFunctionCalculation(NeuralNetwork * neuralnetwork, float *labelvector,
   
 }
 
-float ActivationFunctionCalculaton(NeuralNetwork *neuralnetwork,float Z, int activationfunctiontype){
-
-  Layer *currentlayer;
-  Neuron *currentneuron, *previousneuron;
-  Weight *currentweight;
-
-  float sum = 0;
-  float softmaxsum=0;
+float ActivationFunctionCalculaton(float Z, int activationfunctiontype){
 
 //printf("activaiton function type: %d",activationfunctiontype);
 
 switch (activationfunctiontype){
-  case 1:
+  case PERCEPTRON:
     return Perceptron(Z);
-  case 2:
+  case RELU:
     return ReLU(Z);
-  case 3:
-    return Sigmoid(Z); 
-  case 4:
-
-        currentlayer = neuralnetwork->lastlayer;
-        currentneuron = currentlayer -> firstneuron;
-        previousneuron = currentlayer->previouslayer->firstneuron;
-
-        for (int i = 0; i < currentlayer -> neurons; i++) {
-          currentweight= currentneuron->firstweight;
-          //printf("wieghts %d \nB %f - ",currentneuron->weights,currentneuron->bias);
-          sum+= currentneuron->bias;
-          for (int j = 0;  j< currentneuron -> weights; j++) {
-            sum += currentweight->weight * previousneuron->activationfunctionvalue;
-            //printf("W %f IN %f - ",currentweight->weight,previousneuron->activationfunctionvalue,Z);
-            currentweight =currentweight->nextweight;
-            previousneuron = previousneuron ->nextneuron;
-          }
-          softmaxsum += exp(sum);
-
-          sum = 0;
-          currentneuron = currentneuron -> nextneuron;
-          previousneuron = currentlayer->previouslayer->firstneuron;
-        }
-        //printf("Exp Z %f SOFTMAXSUM += %f\n",exp(Z),softmaxsum);
-
-        return SoftMax(Z,softmaxsum);
-
+  case SIGMOID:
+    return Sigmoid(Z);
+  case SOFTMAX:
+    //keeps Z, the whole layer is normalized by SoftMaxLayer
+    return Z;
   default:
     return 0;
   }
@@ -445,12 +454,15 @@ void FeedFoward(NeuralNetwork * neuralnetwork){
           currentweight =currentweight->nextweight;
           previousneuron = previousneuron ->nextneuron;
         }
-        currentneuron -> activationfunctionvalue =  ActivationFunctionCalculaton(neuralnetwork,Z,currentlayer->activationfunctiontype);
+        currentneuron -> activationfunctionvalue =  ActivationFunctionCalculaton(Z,currentlayer->activationfunctiontype);
         //printf("Z %f ATIVACAO %f\n",Z,currentneuron -> activationfunctionvalue);
         Z = 0;
         currentneuron = currentneuron -> nextneuron;
         previousneuron = currentlayer->previouslayer->firstneuron;
       }
+    if (currentlayer->activationfunctiontype == SOFTMAX) {
+      SoftMaxLayer(currentlayer);
+    }
     currentlayer = currentlayer -> nextlayer;
     }
 }
@@ -641,7 +653,10 @@ void setFederatedLearningGlobalModel() {
   federatedLearningInstance->nodecontrol->interactioncycle=ITERATIONS;
   federatedLearningInstance->nodecontrol->clientnodes=CLIENTS_NUM;
   federatedLearningInstance->nodecontrol->clientnodesregistered=0;
-  InitializeNeuralNetWork(federatedLearningInstance->nodecontrol->neuralnetwork, 4 ,layerconfig0, CATEGORICAL_CROSS_ENTROPY,WEIGHT_VALUE_RANDOM);
+  federatedLearningInstance->nodecontrol->modelsreceived=0;
+  federatedLearningInstance->nodecontrol->roundstarttime=time(NULL);
+  //the aggregation accumulator must start at zero
+  InitializeNeuralNetWork(federatedLearningInstance->nodecontrol->neuralnetwork, 4 ,layerconfig0, CATEGORICAL_CROSS_ENTROPY,WEIGHT_VALUE_ZERO);
   federatedLearningInstance->nodecontrol->neuralnetwork->alpha=ALPHA;
   federatedLearningInstance->nodecontrol->neuralnetwork->epoch = EPOCHS;
   federatedLearningInstance->nodecontrol->neuralnetwork->regularization=L2;
@@ -649,6 +664,11 @@ void setFederatedLearningGlobalModel() {
   federatedLearningInstance->nodecontrol->neuralnetwork->percentualtraining = TRAINING_SAMPLES;
 
   federatedLearningInstance->globalmodelstatus=0;
+
+  free(layerconfig0);
+  free(layerconfig1);
+  free(layerconfig2);
+  free(layerconfig3);
 
   printf("Neural Network Compiled!\n");
 
@@ -710,8 +730,8 @@ void SetNeuralNetworkZeroWeightValue(NeuralNetwork *globalneuralnetwork){
   Layer * currentgloballayer = globalneuralnetwork -> firstlayer;
   while (currentgloballayer != NULL) {
     Neuron * currentglobalneuron = currentgloballayer -> firstneuron;
-    currentglobalneuron->bias = 0;
     while (currentglobalneuron != NULL) {
+      currentglobalneuron->bias = 0;
       Weight * currentglobalweight = currentglobalneuron -> firstweight;
       while (currentglobalweight != NULL) {
         currentglobalweight->weight = 0;
@@ -723,6 +743,81 @@ void SetNeuralNetworkZeroWeightValue(NeuralNetwork *globalneuralnetwork){
   }
 }
 
+//////////////////////////////////////////////////RUNOUTPUT//////////////////////////////////////////////////
+
+//output directories of the current run (modelos/<run id> and resultados/<run id>)
+static char runModelsDir[128] = "modelos";
+static char runResultsDir[128] = "resultados";
+
+static int ValidRunId(const char *runid){
+  size_t len = strlen(runid);
+  if(len == 0 || len > 63){
+    return 0;
+  }
+  for(size_t i = 0; i < len; i++){
+    char c = runid[i];
+    if(!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-')){
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int MakeDirectory(const char *path){
+  if(mkdir(path, 0755) == 0 || errno == EEXIST){
+    return 0;
+  }
+  perror(path);
+  return -1;
+}
+
+//creates the run subfolders; the run id comes from RUN_ID or from the current date and time
+//an existing folder is never reused, so consecutive runs do not overwrite previous results
+int InitRunOutput(){
+
+  char baseid[64];
+  const char *envid = getenv("RUN_ID");
+
+  if(envid != NULL && ValidRunId(envid)){
+    snprintf(baseid, sizeof(baseid), "%s", envid);
+  }else{
+    if(envid != NULL){
+      printf("Invalid RUN_ID '%s', using a timestamp\n", envid);
+    }
+    time_t now = time(NULL);
+    strftime(baseid, sizeof(baseid), "run_%Y%m%d_%H%M%S", localtime(&now));
+  }
+
+  if(MakeDirectory("modelos") != 0 || MakeDirectory("resultados") != 0){
+    return -1;
+  }
+
+  char runid[80];
+  snprintf(runid, sizeof(runid), "%s", baseid);
+
+  for(int suffix = 1; suffix <= 100; suffix++){
+    snprintf(runModelsDir, sizeof(runModelsDir), "modelos/%s", runid);
+    snprintf(runResultsDir, sizeof(runResultsDir), "resultados/%s", runid);
+
+    struct stat info;
+    if(stat(runModelsDir, &info) != 0 && stat(runResultsDir, &info) != 0){
+      if(MakeDirectory(runModelsDir) != 0 || MakeDirectory(runResultsDir) != 0){
+        return -1;
+      }
+      if(strcmp(runid, baseid) != 0){
+        printf("Run id %s already used, using %s\n", baseid, runid);
+      }
+      printf("Run output: %s | %s\n", runModelsDir, runResultsDir);
+      return 0;
+    }
+
+    snprintf(runid, sizeof(runid), "%s_%d", baseid, suffix);
+  }
+
+  fprintf(stderr, "Could not create a new output folder for run %s\n", baseid);
+  return -1;
+}
+
 void SaveModel(int interaction){
 
   FederatedLearning *instance = getFederatedLearningInstance();
@@ -730,8 +825,8 @@ void SaveModel(int interaction){
   cJSON *json = FederatedLearningToJSON(instance);
   char *jsonstring = cJSON_Print(json);
 
-  char filename[64];
-  snprintf(filename, sizeof(filename), "modelos/modelo_%d.json", interaction);
+  char filename[256];
+  snprintf(filename, sizeof(filename), "%s/modelo_%d.json", runModelsDir, interaction);
 
   FILE *modelfile = fopen(filename, "w");
   if (modelfile != NULL) {
@@ -746,89 +841,221 @@ void SaveModel(int interaction){
   free(jsonstring);
 }
 
-void AggregationModel(FederatedLearning * clientmodel){
+//check if the client model has exactly the same structure of the global model
+static int ValidateTopology(NeuralNetwork *reference, NeuralNetwork *client){
 
-
-  FederatedLearning * federatedlearninginstance = getFederatedLearningInstance();
-  federatedlearninginstance->globalmodelstatus=0;
-  
-  if(federatedlearninginstance->nodecontrol->currentinteraction>= federatedlearninginstance->nodecontrol->interactioncycle){
-    printf("The application reached the max interation\n");
-    return;
+  if(reference==NULL || client==NULL || reference->layers!=client->layers){
+    return 0;
   }
 
-  FederatedAveragingSum(federatedlearninginstance->nodecontrol->neuralnetwork,
+  Layer *referencelayer = reference->firstlayer;
+  Layer *clientlayer = client->firstlayer;
+
+  while(referencelayer!=NULL){
+    if(clientlayer==NULL || referencelayer->neurons!=clientlayer->neurons){
+      return 0;
+    }
+
+    Neuron *referenceneuron = referencelayer->firstneuron;
+    Neuron *clientneuron = clientlayer->firstneuron;
+
+    while(referenceneuron!=NULL){
+      if(clientneuron==NULL || referenceneuron->weights!=clientneuron->weights){
+        return 0;
+      }
+
+      Weight *referenceweight = referenceneuron->firstweight;
+      Weight *clientweight = clientneuron->firstweight;
+      while(referenceweight!=NULL){
+        if(clientweight==NULL){
+          return 0;
+        }
+        referenceweight = referenceweight->nextweight;
+        clientweight = clientweight->nextweight;
+      }
+      if(clientweight!=NULL){
+        return 0;
+      }
+
+      referenceneuron = referenceneuron->nextneuron;
+      clientneuron = clientneuron->nextneuron;
+    }
+    if(clientneuron!=NULL){
+      return 0;
+    }
+
+    referencelayer = referencelayer->nextlayer;
+    clientlayer = clientlayer->nextlayer;
+  }
+
+  return clientlayer==NULL;
+}
+
+//close the current round: average the received models and start the next round
+//the caller must hold FederatedLearningLock
+static void FinalizeRound(){
+
+  FederatedLearning * federatedlearninginstance = getFederatedLearningInstance();
+  NodeControl *nodecontrol = federatedlearninginstance->nodecontrol;
+
+  federatedlearninginstance->globalmodelstatus=0;
+
+  if(federatedlearninginstance->trainingscounter > 0){
+    printf("Calculating the new global model (%d models)\n", nodecontrol->modelsreceived);
+
+    //calculate the final weight value
+    FederatedAveraging(nodecontrol->neuralnetwork,federatedlearninginstance->trainingscounter);
+
+    //free the global neural network and copy the neuralnetwork to the global one
+    freeNeuralNetwork(federatedlearninginstance->neuralnetwork);
+    federatedlearninginstance->neuralnetwork = CopyNeuralNetwork(nodecontrol->neuralnetwork);
+  }else{
+    printf("No training samples received, keeping the current global model\n");
+  }
+
+  federatedlearninginstance->trainingscounter = 0;
+
+  // set 0 the neural network
+  SetNeuralNetworkZeroWeightValue(nodecontrol->neuralnetwork);
+  PerformanceMetrics(federatedlearninginstance->neuralnetwork,30,0.5,nodecontrol->clientnodes);
+  nodecontrol->currentinteraction++;
+  SaveModel(nodecontrol->currentinteraction);
+
+  //align all nodes, including the ones that missed the round, with the new round
+  ClientNode *currentclientnode = nodecontrol->firstclientnode;
+  while (currentclientnode!=NULL){
+    currentclientnode->interaction = nodecontrol->currentinteraction;
+    currentclientnode = currentclientnode->nextclientnode;
+  }
+
+  nodecontrol->modelsreceived = 0;
+  nodecontrol->roundstarttime = time(NULL);
+
+  if(nodecontrol->currentinteraction >= nodecontrol->interactioncycle){
+    printf("The application reached the max interation\n");
+    federatedlearninginstance->globalmodelstatus=0;
+  }else{
+    federatedlearninginstance->globalmodelstatus=1;
+  }
+}
+
+//returns 1 if the client model was aggregated, 0 if it was rejected
+//the caller must hold FederatedLearningLock
+int AggregationModel(FederatedLearning * clientmodel, ClientNode * clientnode, int round){
+
+  FederatedLearning * federatedlearninginstance = getFederatedLearningInstance();
+  NodeControl *nodecontrol = federatedlearninginstance->nodecontrol;
+
+  if(nodecontrol->currentinteraction >= nodecontrol->interactioncycle){
+    printf("The application reached the max interation\n");
+    return 0;
+  }
+
+  if(round != nodecontrol->currentinteraction || clientnode->interaction != nodecontrol->currentinteraction){
+    printf("Model from %s rejected: duplicated or late (model round %d, node round %d, current round %d)\n",
+           clientnode->ip_id, round, clientnode->interaction, nodecontrol->currentinteraction);
+    return 0;
+  }
+
+  if(!ValidateTopology(nodecontrol->neuralnetwork, clientmodel->neuralnetwork)){
+    printf("Model from %s rejected: topology differs from the global model\n", clientnode->ip_id);
+    return 0;
+  }
+
+  if(clientmodel->trainingscounter <= 0){
+    printf("Model from %s rejected: invalid trainingscounter %d\n", clientnode->ip_id, clientmodel->trainingscounter);
+    return 0;
+  }
+
+  printf("Aggregating Local Model %s (round %d)\n", clientnode->ip_id, round);
+
+  FederatedAveragingSum(nodecontrol->neuralnetwork,
                   clientmodel->neuralnetwork,
                   clientmodel->trainingscounter);
-                  
-  federatedlearninginstance->trainingscounter += clientmodel->trainingscounter;
 
-  ClientNode *currentclientnode =  federatedlearninginstance->nodecontrol->firstclientnode;
-  
+  federatedlearninginstance->trainingscounter += clientmodel->trainingscounter;
+  clientnode->interaction++;
+  nodecontrol->modelsreceived++;
 
   //check if all nodes sent the local model
+  ClientNode *currentclientnode = nodecontrol->firstclientnode;
   while (currentclientnode!=NULL){
-    //printf("%d %d",federatedlearninginstance->nodecontrol->currentinteraction,currentclientnode->interaction);
-    if(federatedlearninginstance->nodecontrol->currentinteraction==currentclientnode->interaction){
-      federatedlearninginstance->globalmodelstatus=1;
-      
-      return;
+    if(currentclientnode->interaction == nodecontrol->currentinteraction){
+      return 1;
     }
     currentclientnode = currentclientnode->nextclientnode;
   }
 
-  printf("Calculating the new global model");
+  FinalizeRound();
+  return 1;
+}
 
-  federatedlearninginstance->globalmodelstatus=0;
+//close the round with the models already received when some node does not answer
+void CheckRoundTimeout(){
 
-  //calculate the final weight value and set 0 the global training counter
-  FederatedAveraging(federatedlearninginstance->nodecontrol->neuralnetwork,federatedlearninginstance->trainingscounter);
-  federatedlearninginstance->trainingscounter = 0;
-  
-  //free the global neural network and copy the neuralnetwork to the global one
-  freeNeuralNetwork(federatedlearninginstance->neuralnetwork);
-  federatedlearninginstance->neuralnetwork = CopyNeuralNetwork(federatedlearninginstance->nodecontrol->neuralnetwork);
+  FederatedLearningLock();
 
-  // set 0 the neural network
-  SetNeuralNetworkZeroWeightValue(federatedlearninginstance->nodecontrol->neuralnetwork);
-  PerformanceMetrics(federatedlearninginstance->neuralnetwork,30,0.5,federatedlearninginstance->nodecontrol->clientnodes);
-  federatedlearninginstance->nodecontrol->currentinteraction++;
-  SaveModel(federatedlearninginstance->nodecontrol->currentinteraction);
-  federatedlearninginstance->globalmodelstatus=1;
+  FederatedLearning * federatedlearninginstance = getFederatedLearningInstance();
+  NodeControl *nodecontrol = federatedlearninginstance->nodecontrol;
 
+  if(federatedlearninginstance->globalmodelstatus &&
+     time(NULL) - nodecontrol->roundstarttime >= ROUND_TIMEOUT_S){
+
+    if(nodecontrol->modelsreceived == 0){
+      //nobody answered, keep waiting
+      nodecontrol->roundstarttime = time(NULL);
+    }else{
+      printf("Round %d timeout, missing nodes:", nodecontrol->currentinteraction);
+      ClientNode *currentclientnode = nodecontrol->firstclientnode;
+      while (currentclientnode!=NULL){
+        if(currentclientnode->interaction == nodecontrol->currentinteraction){
+          printf(" %s", currentclientnode->ip_id);
+        }
+        currentclientnode = currentclientnode->nextclientnode;
+      }
+      printf("\n");
+      FinalizeRound();
+    }
+  }
+
+  FederatedLearningUnlock();
+}
+
+static float SafeDivision(float numerator, float denominator){
+  return denominator == 0 ? 0 : numerator / denominator;
 }
 
 float Accuracy(int truepositive,int truenegative,int falsepositive,int falsenegative){
-  return (float)(truenegative+truepositive)/(truenegative+truepositive+falsenegative+falsepositive);
+  return SafeDivision(truenegative+truepositive, truenegative+truepositive+falsenegative+falsepositive);
 }
 
 float Precision(int truepositive,int falsepositive){
-  return (float)truepositive/(truepositive+falsepositive);
+  return SafeDivision(truepositive, truepositive+falsepositive);
 }
 
 float Recall(int truepositive,int falsenegative){
-  return (float)truepositive/(truepositive+falsenegative);
+  return SafeDivision(truepositive, truepositive+falsenegative);
 }
 
 float Specificity(int truenegative,int falsepositive){
-  return (float)truenegative/(truenegative+falsepositive);
+  return SafeDivision(truenegative, truenegative+falsepositive);
 }
 
 float F1Score(int truepositive,int falsepositive,int falsenegative){
-  return 2*(float)(Precision(truepositive,falsepositive) * 
-                  Recall(truepositive,falsenegative))/(
-                  Precision(truepositive,falsepositive) + 
-                  Recall(truepositive,falsenegative));
+  float precision = Precision(truepositive,falsepositive);
+  float recall = Recall(truepositive,falsenegative);
+  return SafeDivision(2 * precision * recall, precision + recall);
 }
 
 void PerformanceMetrics(NeuralNetwork * neuralnetwork,int PercentualEvaluation,float Threshold, int clientnodes){
   
-  float trainingsample[neuralnetwork->firstlayer->neurons + neuralnetwork->lastlayer->neurons];
+  int num_data = neuralnetwork->firstlayer->neurons + neuralnetwork->lastlayer->neurons;
+  float trainingsample[num_data];
   float label[neuralnetwork->lastlayer->neurons];
   int total=0,truepositive=0,falsepositive=0,truenegative=0,falsenegative=0;
+  int samples=0;
   float totalloss=0;
-  Layer * currentlayer = neuralnetwork -> firstlayer;
-  Neuron * currentneuron = currentlayer -> firstneuron;
+  Neuron * currentneuron;
 
   FILE * file = NULL;
   char line[1024];
@@ -840,23 +1067,27 @@ void PerformanceMetrics(NeuralNetwork * neuralnetwork,int PercentualEvaluation,f
     return;
   }
 
-  for(int count =0;count<PercentualEvaluation;count++){
-      fgets(line, sizeof(line), file);
+  while(samples<PercentualEvaluation && fgets(line, sizeof(line), file) != NULL){
 
-        // Divide a linha em campos usando a função strtok
-        char * token = strtok(line, ","); 
+        // Divide a linha em campos usando a função strtok (o primeiro campo é o id)
+        char * token = strtok(line, ",");
+        int fields = 0;
 
-        for (int i = 0; i < 7; i++){
+        for (int i = 0; i < num_data; i++){
           token = strtok(NULL, ",");
-          if (token != NULL) {
-            trainingsample[i] = strtof(token, NULL);
-          } else {
-            // Lidando com o caso em que não há dados suficientes na linha
-            printf("Erro: Não há dados suficientes para preencher InputData na linha.\n");
+          if (token == NULL) {
             break;
           }
-
+          trainingsample[i] = strtof(token, NULL);
+          fields++;
         }
+
+        if (fields != num_data) {
+          // linha vazia ou incompleta: não avalia com dados antigos
+          printf("Erro: Não há dados suficientes para preencher InputData na linha.\n");
+          continue;
+        }
+        samples++;
 
         currentneuron =  neuralnetwork->firstlayer->firstneuron;
         for (int i = 0; i < neuralnetwork->firstlayer->neurons; i++) {
@@ -871,7 +1102,8 @@ void PerformanceMetrics(NeuralNetwork * neuralnetwork,int PercentualEvaluation,f
         }
 
       FeedFoward(neuralnetwork);
-      totalloss += LossFunctionCalculation(neuralnetwork, label, neuralnetwork->regularization, neuralnetwork->lambda);
+      //evaluation loss without the regularization term
+      totalloss += LossFunctionCalculation(neuralnetwork, label, NONE_REGULARIZATION, 0);
 
       currentneuron = neuralnetwork->lastlayer->firstneuron;
 
@@ -881,15 +1113,15 @@ void PerformanceMetrics(NeuralNetwork * neuralnetwork,int PercentualEvaluation,f
           if(currentneuron->activationfunctionvalue > Threshold){
             truepositive++;
           }else{
-            falsepositive++;
+            falsenegative++;
           }
           total++;
-          
+
         }else{
           if(currentneuron->activationfunctionvalue < Threshold){
             truenegative++;
           }else{
-            falsenegative++;
+            falsepositive++;
           }
           total++;
         }
@@ -898,7 +1130,7 @@ void PerformanceMetrics(NeuralNetwork * neuralnetwork,int PercentualEvaluation,f
   }
 
   fclose(file);
-  float avgloss = totalloss / PercentualEvaluation;
+  float avgloss = SafeDivision(totalloss, samples);
   printf("total = %d, TP = %d, TN = %d, FP = %d, FN = %d\n",total,truepositive,truenegative,falsepositive,falsenegative);
   printf("Loss: %.4f\n",avgloss);
   printf("Accuracy: %.2f\n",Accuracy(truepositive,truenegative,falsepositive,falsenegative));
@@ -910,7 +1142,10 @@ void PerformanceMetrics(NeuralNetwork * neuralnetwork,int PercentualEvaluation,f
   FederatedLearning *instance = getFederatedLearningInstance();
   int interaction = instance->nodecontrol->currentinteraction;
 
-  FILE *metricsfile = fopen("resultados/metrics.csv", "a");
+  char metricsfilename[256];
+  snprintf(metricsfilename, sizeof(metricsfilename), "%s/metrics.csv", runResultsDir);
+
+  FILE *metricsfile = fopen(metricsfilename, "a");
   if (metricsfile != NULL) {
     if (ftell(metricsfile) == 0) {
       fprintf(metricsfile, "interaction,nodes,loss,accuracy,precision,recall,specificity,f1score,TP,TN,FP,FN\n");

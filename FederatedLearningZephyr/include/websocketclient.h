@@ -3,6 +3,6 @@
 
 #include "espconfiguration.h"
 
-void websocket_send_local_model();
+int websocket_send_local_model(int round);
 
 #endif

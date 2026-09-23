@@ -13,7 +13,8 @@
 /* No Zephyr, registramos o módulo de log assim, sem precisar passar a TAG nos prints */
 LOG_MODULE_REGISTER(WebSocketClient, LOG_LEVEL_INF);
 
-void websocket_send_local_model(void)
+// Retorna 0 se o modelo local foi enviado
+int websocket_send_local_model(int round)
 {
     int sock;
     int ws_sock;
@@ -40,14 +41,14 @@ void websocket_send_local_model(void)
     sock = zsock_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock < 0) {
         LOG_ERR("Falha ao criar socket TCP: %d", errno);
-        return;
+        return -1;
     }
 
     ret = zsock_connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr));
     if (ret < 0) {
         LOG_ERR("Falha ao conectar via TCP: %d", errno);
         zsock_close(sock);
-        return;
+        return -1;
     }
 
     // 3. Estruturar a requisição do WebSocket conforme a documentação oficial
@@ -65,7 +66,7 @@ void websocket_send_local_model(void)
     if (ws_sock < 0) {
         LOG_ERR("Falha no handshake WebSocket: %d", ws_sock);
         zsock_close(sock);
-        return;
+        return -1;
     }
 
     LOG_INF("WEBSOCKET_EVENT_CONNECTED");
@@ -74,17 +75,20 @@ void websocket_send_local_model(void)
     cJSON *root = federatedLearningToJSON(getFederatedLearningInstance());
     if (root == NULL) {
         LOG_ERR("Falha ao criar JSON do modelo.");
-        websocket_disconnect(ws_sock);
-        zsock_close(sock);
-        return;
+        websocket_disconnect(ws_sock); // também fecha o socket TCP
+        return -1;
     }
+
+    // Rodada do modelo global usado no treino: o servidor rejeita modelos duplicados ou atrasados
+    cJSON_AddNumberToObject(root, "round", round);
 
     char *json_string = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);   // Corrige o vazamento da árvore JSON
 
     // 6. Enviar os dados via WebSocket
+    ret = -1;
     if (json_string != NULL) {
-        LOG_INF("Enviando modelo local (%d bytes)...", strlen(json_string));
+        LOG_INF("Enviando modelo local (%zu bytes)...", strlen(json_string));
         
         ret = websocket_send_msg(ws_sock, json_string, strlen(json_string),
                                  WEBSOCKET_OPCODE_DATA_TEXT, true, true, SYS_FOREVER_MS);
@@ -99,10 +103,9 @@ void websocket_send_local_model(void)
         cJSON_free(json_string);
     }
 
-    // 7. Encerrar a conexão
+    // 7. Encerrar a conexão (websocket_disconnect também fecha o socket TCP)
     websocket_disconnect(ws_sock);
-    zsock_close(sock);
-    
-    
+
     LOG_INF("Websocket Stopped");
+    return ret < 0 ? -1 : 0;
 }

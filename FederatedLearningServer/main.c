@@ -18,6 +18,12 @@ int main() {
 
     setbuf(stdout, NULL);
 
+    // Cada execução grava modelos e métricas em modelos/<run id> e resultados/<run id>
+    if (InitRunOutput() != 0) {
+        fprintf(stderr, "Erro ao criar as pastas de resultado da execução\n");
+        return 1;
+    }
+
     FederatedLearning *FDI =  getFederatedLearningInstance();
     setFederatedLearningGlobalModel();
     //PerformanceMetrics(30,0.5);

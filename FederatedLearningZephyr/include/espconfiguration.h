@@ -11,6 +11,8 @@
 #define LED_PIN_SYNC 27
 #define BUTTON_PIN 26
 
+#include <stdbool.h>
+
 extern struct k_sem wifi_connected_sem;
 
 // Credenciais de Rede
@@ -36,5 +38,7 @@ extern struct k_sem wifi_connected_sem;
 // Funções de inicialização restantes
 void WIFIConfiguration(void);
 void GPIOConfiguration(void);
+bool wifi_is_connected(void);
+void wifi_wait_connected(void);
 
 #endif

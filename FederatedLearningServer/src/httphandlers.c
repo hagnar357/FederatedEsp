@@ -50,14 +50,8 @@ void handle_testpost_request(int client_socket, const char *request_body){
     write(client_socket, response, strlen(response));
 }
 
-void handle_get_globalmodel(int client_socket) {
-    FederatedLearning *FederatedLearningInstance = getFederatedLearningInstance();
-
-    cJSON *json_response = FederatedLearningToJSON(FederatedLearningInstance);
-    char *response_str = cJSON_Print(json_response);
-    cJSON_Delete(json_response);
-
-    // ✅ Cabeçalho HTTP completo e correto
+// Sends a JSON body with a complete HTTP header. The socket is closed by handle_request.
+static void send_json_response(int client_socket, const char *response_str) {
     char header[256];
     snprintf(header, sizeof(header),
              "HTTP/1.1 200 OK\r\n"
@@ -67,13 +61,25 @@ void handle_get_globalmodel(int client_socket) {
              "\r\n",
              strlen(response_str));
 
-    // Envia resposta HTTP corretamente
     write(client_socket, header, strlen(header));
     write(client_socket, response_str, strlen(response_str));
+}
 
-    // Fecha conexão (boa prática)
-    shutdown(client_socket, SHUT_RDWR);
-    close(client_socket);
+void handle_get_globalmodel(int client_socket) {
+    FederatedLearningLock();
+    FederatedLearning *FederatedLearningInstance = getFederatedLearningInstance();
+    cJSON *json_response = FederatedLearningToJSON(FederatedLearningInstance);
+    FederatedLearningUnlock();
+
+    char *response_str = cJSON_Print(json_response);
+    cJSON_Delete(json_response);
+
+    if (response_str == NULL) {
+        handle_not_found_request(client_socket);
+        return;
+    }
+
+    send_json_response(client_socket, response_str);
     free(response_str);
 }
 
@@ -107,59 +113,51 @@ void handle_post_globalmodel(int client_socket, const char *request_body) {
     write(client_socket, response, strlen(response));
 }
 
-void handle_get_checkmodelstatus(int client_socket,char *ip_addr){
-    FederatedLearning *FederatedLearningInstance = getFederatedLearningInstance();
 
-    //printf("%s cheking model status\n", ip_addr);
-
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddNumberToObject(root, "status", 0);
-
-    int registered = 0;
-
-    ClientNode *currentclientnode =  FederatedLearningInstance->nodecontrol->firstclientnode;
-    while(currentclientnode!=NULL){
-        if(strcmp(currentclientnode->ip_id,ip_addr)==0){
-            //printf("Node %s is registered\n",currentclientnode->ip_id);
-            registered = 1;
-            break;
+static ClientNode *find_client_node(FederatedLearning *instance, const char *ip_addr) {
+    ClientNode *currentclientnode = instance->nodecontrol->firstclientnode;
+    while (currentclientnode != NULL) {
+        if (strcmp(currentclientnode->ip_id, ip_addr) == 0) {
+            return currentclientnode;
         }
         currentclientnode = currentclientnode->nextclientnode;
     }
+    return NULL;
+}
 
-    //printf("clientnodesregistered %d clientnodes %d registered %d \n",FederatedLearningInstance->nodecontrol->clientnodesregistered,FederatedLearningInstance->nodecontrol->clientnodes,registered);
+void handle_get_checkmodelstatus(int client_socket,char *ip_addr){
 
-    if(FederatedLearningInstance->nodecontrol->clientnodesregistered==FederatedLearningInstance->nodecontrol->clientnodes && registered){
-    //printf("nodeinteraction %d currentinteraction %d globalmodelstatus %d \n",currentclientnode->interaction,FederatedLearningInstance->nodecontrol->currentinteraction,FederatedLearningInstance->globalmodelstatus);
-            
-        if(currentclientnode->interaction==FederatedLearningInstance->nodecontrol->currentinteraction && FederatedLearningInstance->globalmodelstatus){
-            //printf("Same interaction and global modal 1\n");
-            cJSON *status_item = cJSON_GetObjectItem(root, "status");
-            if (status_item != NULL) {
-                cJSON_SetNumberValue(status_item, 1);
-            } 
-        }
+    int status = 0;
+
+    FederatedLearningLock();
+    FederatedLearning *FederatedLearningInstance = getFederatedLearningInstance();
+    NodeControl *nodecontrol = FederatedLearningInstance->nodecontrol;
+    int round = nodecontrol->currentinteraction;
+
+    ClientNode *currentclientnode = find_client_node(FederatedLearningInstance, ip_addr);
+
+    //the node receives 1 only if all nodes are registered and it did not send the model of this round yet
+    if(nodecontrol->clientnodesregistered == nodecontrol->clientnodes &&
+       currentclientnode != NULL &&
+       currentclientnode->interaction == nodecontrol->currentinteraction &&
+       FederatedLearningInstance->globalmodelstatus){
+        status = 1;
+    }
+    FederatedLearningUnlock();
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "status", status);
+    cJSON_AddNumberToObject(root, "round", round);
+    char *response_str = cJSON_Print(root);
+    cJSON_Delete(root);
+
+    if (response_str == NULL) {
+        handle_not_found_request(client_socket);
+        return;
     }
 
-    char * response_str = cJSON_Print(root);
-    
-    // ✅ Cabeçalho HTTP completo e correto
-    char header[256];
-    snprintf(header, sizeof(header),
-             "HTTP/1.1 200 OK\r\n"
-             "Content-Type: application/json\r\n"
-             "Content-Length: %zu\r\n"
-             "Connection: close\r\n"
-             "\r\n",
-             strlen(response_str));
-
-    // Envia resposta HTTP corretamente
-    write(client_socket, header, strlen(header));
-    write(client_socket, response_str, strlen(response_str));
-
-    // Fecha conexão (boa prática)
-    shutdown(client_socket, SHUT_RDWR);
-    close(client_socket);
+    send_json_response(client_socket, response_str);
+    free(response_str);
 }
 
 
@@ -167,83 +165,53 @@ void handle_get_checkmodelstatus(int client_socket,char *ip_addr){
 void handle_get_noderegister(int client_socket, char *ip_addr) {
     printf("Client IP: %s\n", ip_addr);
 
-    char *response_str;
+    const char *response_str;
 
+    FederatedLearningLock();
     FederatedLearning *fedLearninginstance = getFederatedLearningInstance();
-    ClientNode *clientnode;
+    NodeControl *nodecontrol = fedLearninginstance->nodecontrol;
 
-    if (fedLearninginstance->nodecontrol->clientnodesregistered == fedLearninginstance->nodecontrol->clientnodes) {
+    if (find_client_node(fedLearninginstance, ip_addr) != NULL) {
+        //already registered nodes can register again (e.g. after a reboot)
+        response_str = "{\"status\":\"registred\"}";
+        printf("Node already Added\n");
+    } else if (nodecontrol->clientnodesregistered >= nodecontrol->clientnodes) {
         response_str = "{\"status\":\"limit reached\"}";
         printf("Node limit reached\n");
     } else {
-        if (fedLearninginstance->nodecontrol->firstclientnode == NULL) {
-            clientnode = (ClientNode *)malloc(sizeof(ClientNode));
-            clientnode->interaction = 0;
-            strcpy(clientnode->ip_id, ip_addr);
+        ClientNode *clientnode = (ClientNode *)calloc(1, sizeof(ClientNode));
+        if (clientnode == NULL) {
+            response_str = "{\"status\":\"error\"}";
+        } else {
+            clientnode->interaction = nodecontrol->currentinteraction;
+            snprintf(clientnode->ip_id, sizeof(clientnode->ip_id), "%s", ip_addr);
             clientnode->nextclientnode = NULL;
-            clientnode->previousclientnode = NULL;
+            clientnode->previousclientnode = nodecontrol->lastclientnode;
 
-            fedLearninginstance->nodecontrol->firstclientnode = clientnode;
-            fedLearninginstance->nodecontrol->lastclientnode = clientnode;
-            fedLearninginstance->nodecontrol->clientnodesregistered++;
+            if (nodecontrol->firstclientnode == NULL) {
+                nodecontrol->firstclientnode = clientnode;
+            } else {
+                nodecontrol->lastclientnode->nextclientnode = clientnode;
+            }
+            nodecontrol->lastclientnode = clientnode;
+            nodecontrol->clientnodesregistered++;
 
             response_str = "{\"status\":\"added\"}";
-            printf("First client node Added\n");
-        } else {
-            int ctrl = 1;
-            clientnode = fedLearninginstance->nodecontrol->firstclientnode;
+            printf("Client node Added\n");
 
-            while (clientnode != NULL) {
-                if (strcmp(clientnode->ip_id, ip_addr) == 0) {
-                    response_str = "{\"status\":\"registred\"}";
-                    printf("Node already Added\n");
-                    ctrl = 0;
-                    break;
-                }
-                clientnode = clientnode->nextclientnode;
-            }
-
-            if (ctrl != 0) {
-                clientnode = (ClientNode *)malloc(sizeof(ClientNode));
-                clientnode->interaction = 0;
-                strcpy(clientnode->ip_id, ip_addr);
-                clientnode->nextclientnode = NULL;
-                clientnode->previousclientnode = fedLearninginstance->nodecontrol->lastclientnode;
-
-                fedLearninginstance->nodecontrol->lastclientnode->nextclientnode = clientnode;
-                fedLearninginstance->nodecontrol->lastclientnode = clientnode;
-                fedLearninginstance->nodecontrol->clientnodesregistered++;
-
-                response_str = "{\"status\":\"added\"}";
-                printf("Client node Added\n");
+            if (nodecontrol->clientnodesregistered == nodecontrol->clientnodes) {
+                //all nodes registered: the first round starts now
+                fedLearninginstance->globalmodelstatus = 1;
+                nodecontrol->roundstarttime = time(NULL);
             }
         }
     }
 
-    if (fedLearninginstance->nodecontrol->clientnodesregistered == fedLearninginstance->nodecontrol->clientnodes) {
-        fedLearninginstance->globalmodelstatus = 1;
-    }
-
     printf("client nodes registered %d client nodes %d\n",
-           fedLearninginstance->nodecontrol->clientnodesregistered,
-           fedLearninginstance->nodecontrol->clientnodes);
+           nodecontrol->clientnodesregistered,
+           nodecontrol->clientnodes);
     printf("Global Model Status %d\n", fedLearninginstance->globalmodelstatus);
+    FederatedLearningUnlock();
 
-    // ✅ Cabeçalho HTTP completo e correto
-    char header[256];
-    snprintf(header, sizeof(header),
-             "HTTP/1.1 200 OK\r\n"
-             "Content-Type: application/json\r\n"
-             "Content-Length: %zu\r\n"
-             "Connection: close\r\n"
-             "\r\n",
-             strlen(response_str));
-
-    // Envia resposta HTTP corretamente
-    write(client_socket, header, strlen(header));
-    write(client_socket, response_str, strlen(response_str));
-
-    // Fecha conexão (boa prática)
-    shutdown(client_socket, SHUT_RDWR);
-    close(client_socket);
+    send_json_response(client_socket, response_str);
 }

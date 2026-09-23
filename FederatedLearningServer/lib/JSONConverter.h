@@ -1,5 +1,5 @@
-#ifndef HTTPHANDLERS_H
-#define HTTPHANDLERS_H
+#ifndef JSONCONVERTER_H
+#define JSONCONVERTER_H
 
 #include "federatedlearning.h"
 #include "../lib/cJSON.h"

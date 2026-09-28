@@ -75,7 +75,8 @@ int websocket_send_local_model(int round)
     cJSON *root = federatedLearningToJSON(getFederatedLearningInstance());
     if (root == NULL) {
         LOG_ERR("Falha ao criar JSON do modelo.");
-        websocket_disconnect(ws_sock); // também fecha o socket TCP
+        websocket_disconnect(ws_sock); // envia CLOSE e libera o contexto WebSocket
+        zsock_close(sock);             // o socket TCP precisa ser fechado separadamente
         return -1;
     }
 
@@ -103,8 +104,10 @@ int websocket_send_local_model(int round)
         cJSON_free(json_string);
     }
 
-    // 7. Encerrar a conexão (websocket_disconnect também fecha o socket TCP)
+    // 7. Encerrar a conexão: websocket_disconnect NÃO fecha o socket TCP subjacente,
+    // sem o zsock_close cada envio vaza um descritor e o handshake passa a falhar com -ENOSPC
     websocket_disconnect(ws_sock);
+    zsock_close(sock);
 
     LOG_INF("Websocket Stopped");
     return ret < 0 ? -1 : 0;

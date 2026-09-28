@@ -10,6 +10,7 @@
 #include <cJSON.h>
 #include "JSONConverter.h"
 #include "federatedlearning.h"
+#include "knowledgedistillation.h"
 
 LOG_MODULE_REGISTER(HTTP_CLIENT, LOG_LEVEL_INF);
 
@@ -77,7 +78,8 @@ static int http_response_cb(struct http_response *rsp,
 
 // O motor principal de requisições HTTP do nosso Zephyr
 // Retorna 0 somente se a resposta completa chegou com HTTP 200 (corpo em response_buffer)
-static int perform_http_request(enum http_method method, const char *path, const char *payload)
+// Respostas 4xx não são repetidas (o recurso não existe/não é aceito); erros de rede e 5xx são
+static int perform_http_request_retries(enum http_method method, const char *path, const char *payload, int max_retries)
 {
     int sock;
     struct sockaddr_in server_addr;
@@ -92,7 +94,7 @@ static int perform_http_request(enum http_method method, const char *path, const
     server_addr.sin_port = htons(SERVER_PORT);
     zsock_inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr);
 
-    for (int retries = 0; retries < MAX_RETRIES; retries++) {
+    for (int retries = 0; retries < max_retries; retries++) {
 
         if (retries > 0) {
             k_msleep(1000 * retries); // backoff entre tentativas
@@ -143,11 +145,20 @@ static int perform_http_request(enum http_method method, const char *path, const
         }
 
         LOG_ERR("Erro na requisição %s: ret %d, HTTP %d (tentativa %d)", path, ret, response_status_code, retries + 1);
+
+        if (ret >= 0 && response_status_code >= 400 && response_status_code < 500) {
+            break;
+        }
     }
 
     clear_response_buffer();
-    LOG_ERR("Falha após %d tentativas", MAX_RETRIES);
+    LOG_ERR("Falha na requisição %s", path);
     return -1; // Falha
+}
+
+static int perform_http_request(enum http_method method, const char *path, const char *payload)
+{
+    return perform_http_request_retries(method, path, payload, MAX_RETRIES);
 }
 
 
@@ -220,6 +231,51 @@ FederatedLearning *getglobalmodel() {
     }
     clear_response_buffer();
     return FederatedLearningInstance;
+}
+
+
+// Baixa o teacher da destilação (mesmo formato do modelo global + objeto opcional "distillation")
+// Em falha mantém o teacher já em cache (se houver)
+int getteachermodel() {
+    if (perform_http_request_retries(HTTP_GET, GET_TEACHER_MODEL, NULL, 1) != 0) {
+        LOG_WRN("Teacher indisponível: %s", KnowledgeDistillationGetTeacher() != NULL ?
+                "mantendo o teacher em cache" : "treino sem destilação");
+        return -1;
+    }
+
+    int ret = -1;
+    cJSON *req = cJSON_Parse(response_buffer);
+    clear_response_buffer();
+
+    if (req == NULL) {
+        LOG_ERR("Falha no parse do teacher");
+        return -1;
+    }
+
+    // parâmetros de destilação enviados pelo servidor (opcionais)
+    float temperature = 0;
+    float alpha = -1;
+    cJSON *distillation = cJSON_GetObjectItem(req, "distillation");
+    if (cJSON_IsObject(distillation)) {
+        cJSON *temperature_item = cJSON_GetObjectItem(distillation, "temperature");
+        cJSON *alpha_item = cJSON_GetObjectItem(distillation, "alpha");
+        if (cJSON_IsNumber(temperature_item)) {
+            temperature = (float)temperature_item->valuedouble;
+        }
+        if (cJSON_IsNumber(alpha_item)) {
+            alpha = (float)alpha_item->valuedouble;
+        }
+    }
+
+    FederatedLearning *teacher = JSONToFederatedLearning(req);
+    cJSON_Delete(req);
+
+    if (teacher != NULL) {
+        ret = KnowledgeDistillationSetTeacher(teacher, temperature, alpha);
+    } else {
+        LOG_ERR("Teacher inválido");
+    }
+    return ret;
 }
 
 

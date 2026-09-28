@@ -24,4 +24,5 @@ target_sources(app PRIVATE
     src/httpclient.c
     src/JSONConverter.c
     src/websocketclient.c
+    src/knowledgedistillation.c
 )

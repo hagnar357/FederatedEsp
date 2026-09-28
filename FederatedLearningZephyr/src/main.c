@@ -13,6 +13,7 @@
 #include "websocketclient.h"
 #include "federatedlearning.h"
 #include "JSONConverter.h"
+#include "knowledgedistillation.h"
 
 LOG_MODULE_REGISTER(MAIN, LOG_LEVEL_INF);
 
@@ -129,6 +130,12 @@ void deep_learning(){
         }
 
         replaceNeuralNetwork(globalmodelinstance);
+
+        // o teacher é atualizado a cada rodada; em falha o teacher em cache continua valendo
+        if (KnowledgeDistillationIsEnabled()) {
+            getteachermodel();
+        }
+
         NeuralNetworkTraining();
 
         if (getFederatedLearningInstance()->trainingscounter <= 0) {
@@ -157,6 +164,9 @@ void deep_learning_test(){
         replaceNeuralNetwork(globalmodelinstance);
         FederatedLearning *FDI = getFederatedLearningInstance();
         PrintNeuralNetwork(FDI->neuralnetwork);
+        if (KnowledgeDistillationIsEnabled()) {
+            getteachermodel();
+        }
         NeuralNetworkTraining();
         PrintNeuralNetwork(FDI->neuralnetwork);
     }

@@ -27,6 +27,7 @@ typedef struct Neuron {
   char neurontype[20];
   int weights;
   float activationfunctionvalue;
+  float preactivation; // Z before the activation (logit on the output layer), not serialized
   float bias;
   struct Weight * firstweight, * lastweight;
   struct Neuron * nextneuron, * previousneuron;
@@ -70,6 +71,12 @@ void mergeNeuralNetwork(FederatedLearning * newfederatedlearninginstance);
 void PrintNeuralNetwork(NeuralNetwork * neuralnetwork);
 //void NeuralNetworkTraining(NeuralNetwork * neuralnetwork, float LearningRate,int epoch,int PercentualTraining);
 void NeuralNetworkTraining();
+void FeedFoward(NeuralNetwork * neuralnetwork);
+void BackPropagation(NeuralNetwork *neuralnetwork, const float *outputdelta, float alpha, int regularization, float lambda);
+void CrossEntropyOutputDelta(NeuralNetwork *neuralnetwork, const float *label, float *delta);
+float RidgeRegressionCalculation(NeuralNetwork *neuralnetwork,float lambda);
+float LassoRegressionCalculation(NeuralNetwork *neuralnetwork,float lambda);
+float LossFunctionCalculation(NeuralNetwork * neuralnetwork, float *labelvector, int regularization,float lambda);
 void teste();
 
 int contar_instancias(const char *caminho_arquivo);

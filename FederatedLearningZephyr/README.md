@@ -114,3 +114,46 @@ west build -b heltec_wireless_stick_lite_v3/esp32s3/procpu ./FederatedEdgeComput
 * **Memória Dinâmica (RAM):** O gerenciamento de memória ao receber pacotes HTTP ou montar JSONs é feito estritamente utilizando a biblioteca nativa do C (`realloc`, `free`), garantindo a estabilidade do Heap do Zephyr.
 * **Handshake WebSocket:** O servidor central (`libwebsockets` em C/Node/Python) exige um subprotocolo estrito para aceitar conexões. A requisição WebSocket no cliente Zephyr foi modificada para injetar o cabeçalho obrigatório: `Sec-WebSocket-Protocol: echo-protocol`. Sem ele, a conexão retorna o erro `-113 (ECONNABORTED)`.
 
+
+---
+
+## 7. Knowledge Distillation (Destilação de Conhecimento)
+
+O nó pode treinar o modelo local destilando um **teacher enviado pelo servidor**. O modelo local (student) mantém a arquitetura do modelo global, que é o que o servidor aceita na agregação. O teacher pode ter qualquer arquitetura, desde que tenha o mesmo número de entradas e de saídas e a camada de saída seja SOFTMAX.
+
+### Função de perda
+Para cada amostra, com logits do student `z_s`, logits do teacher `z_t`, temperatura `T` e peso `alpha`:
+
+```
+L = (1 - alpha) * CE(y, softmax(z_s)) + alpha * T^2 * KL( softmax(z_t/T) || softmax(z_s/T) )   (+ termo L1/L2 do modelo)
+dL/dz_s = (1 - alpha) * (softmax(z_s) - y) + alpha * T * (softmax(z_s/T) - softmax(z_t/T))
+```
+Com `alpha = 0`, o treino é idêntico ao treino sem destilação.
+
+### Ativação
+Por Kconfig (`prj.conf`), desligado por padrão:
+```
+CONFIG_FL_KNOWLEDGE_DISTILLATION=y
+CONFIG_FL_KD_TEMPERATURE_X10=30   # T = 3.0
+CONFIG_FL_KD_ALPHA_PERCENT=50     # alpha = 0.5
+```
+Ou só no build: `west build ... -- -DCONFIG_FL_KNOWLEDGE_DISTILLATION=y`.
+
+Em tempo de execução (`include/knowledgedistillation.h`), chamado na mesma thread do treino:
+```c
+KnowledgeDistillationEnable(3.0f, 0.5f);   // liga com T e alpha locais
+KnowledgeDistillationDisable();
+KnowledgeDistillationGetConfig();          // valores efetivos (os do servidor têm prioridade)
+```
+
+### Contrato com o servidor
+Com a destilação ligada, a cada rodada o nó faz `GET /api/getteachermodel` (uma tentativa, sem repetir em 4xx) antes de treinar. A resposta usa o **mesmo JSON de `/api/getglobalmodel`**, com um objeto opcional de parâmetros:
+```json
+{
+  "distillation": { "temperature": 3.0, "alpha": 0.5 },
+  "neuralnetwork": { "layers": 3, "layersArray": [ ... ] }
+}
+```
+- `temperature` e `alpha`, quando enviados, substituem os valores locais.
+- Se a requisição falhar, o nó usa o teacher recebido numa rodada anterior. Se nunca recebeu um teacher, treina sem destilação. O modelo continua sendo enviado normalmente.
+- O teacher é parseado com cJSON no heap (`CONFIG_HEAP_MEM_POOL_SIZE`). Um teacher muito maior que o modelo atual pode exigir aumentar esse heap.

@@ -16,12 +16,14 @@
 #define GET_GLOBAL_MODEL_STATUS "/api/checkglobalmodel"
 #define GET_REGISTER_NODE       "/api/noderegister"
 #define POST_GLOBAL_MODEL       "/api/postglobalmodel"
+#define GET_TEACHER_MODEL       "/api/getteachermodel"
 
 // 3. Assinaturas das funções (removendo os parâmetros do FreeRTOS)
 FederatedLearning* getglobalmodel(void);
 int getglobalmodelstatus(int *round);
 void postglobalmodel(void);
 int getregisternode(void);
+int getteachermodel(void);
 
 // Alterado para void (sem o pvParameters do FreeRTOS)
 void http_post_task(void);

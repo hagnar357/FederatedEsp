@@ -6,6 +6,7 @@
 
 #include "federatedlearning.h"
 #include "espconfiguration.h"
+#include "knowledgedistillation.h"
 #include <zephyr/fs/fs.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/kernel.h>
@@ -498,6 +499,7 @@ void FeedFoward(NeuralNetwork * neuralnetwork){
           currentweight =currentweight->nextweight;
           previousneuron = previousneuron ->nextneuron;
         }
+        currentneuron -> preactivation = Z;
         currentneuron -> activationfunctionvalue =  ActivationFunctionCalculaton(Z,currentlayer->activationfunctiontype);
         //printf("Z %f ATIVACAO %f\n",Z,currentneuron -> activationfunctionvalue);
         Z = 0;
@@ -511,7 +513,18 @@ void FeedFoward(NeuralNetwork * neuralnetwork){
     }
 }
 
-void BackPropagation(NeuralNetwork *neuralnetwork, float *label, float alpha, int regularization, float lambda){
+//output delta of softmax + categorical cross entropy: a - y
+void CrossEntropyOutputDelta(NeuralNetwork *neuralnetwork, const float *label, float *delta){
+  Neuron *currentneuron = neuralnetwork->lastlayer->firstneuron;
+  for (int i = 0; i < neuralnetwork->lastlayer->neurons; i++) {
+    delta[i] = currentneuron->activationfunctionvalue - label[i];
+    currentneuron = currentneuron->nextneuron;
+  }
+}
+
+//outputdelta: gradient of the loss w.r.t. the output layer pre-activations (e.g. CrossEntropyOutputDelta
+//or KnowledgeDistillationOutputDelta)
+void BackPropagation(NeuralNetwork *neuralnetwork, const float *outputdelta, float alpha, int regularization, float lambda){
   //printf("BACKPROPAGATION\n");
       
   //aux memory 
@@ -537,9 +550,7 @@ void BackPropagation(NeuralNetwork *neuralnetwork, float *label, float alpha, in
       currentneuron = currentlayer -> firstneuron;
 
       for (int i = 0; i < currentlayer->neurons; i++) {
-        deltafunctions[i] =  currentneuron->activationfunctionvalue - label[i];
-        //printf("label %f output value %f delta %f\n",label[i],currentneuron -> activationfunctionvalue,deltafunctions[i]);
-        currentneuron = currentneuron -> nextneuron;
+        deltafunctions[i] = outputdelta[i];
       }
 
       //printf("\n");
@@ -656,8 +667,12 @@ void NeuralNetworkTraining() {
   }
 
   int num_data = neuralnetwork->firstlayer->neurons + neuralnetwork->lastlayer->neurons;
+  int outputs = neuralnetwork->lastlayer->neurons;
   float trainingsample[num_data];
-  float label[neuralnetwork->lastlayer->neurons];
+  float label[outputs];
+  float outputdelta[outputs];
+  float studentlogits[outputs];
+  float teacherlogits[outputs];
   float Error = 0.0;
   int trainedsamples = 0;
 
@@ -675,6 +690,24 @@ void NeuralNetworkTraining() {
   neuralnetwork->percentualtraining = (int)total_instancias;
   
   LOG_INF("Iniciando treino. Instâncias no Dataset: %d",neuralnetwork->percentualtraining);
+
+  // Knowledge distillation: the teacher (sent by the server) is only used for inference
+  NeuralNetwork *teacher = NULL;
+  KnowledgeDistillationConfig kdconfig = KnowledgeDistillationGetConfig();
+  if (kdconfig.enabled) {
+      if (KnowledgeDistillationGetTeacher() == NULL) {
+          LOG_WRN("KD habilitado, mas sem teacher: treino sem destilação.");
+      } else if (!KnowledgeDistillationTeacherCompatible(neuralnetwork)) {
+          LOG_WRN("Teacher incompatível com o modelo (entradas/saídas): treino sem destilação.");
+      } else {
+          teacher = KnowledgeDistillationGetTeacher();
+      }
+  }
+  if (teacher != NULL) {
+      LOG_INF("KD on (T=%.2f, alpha=%.2f)", (double)kdconfig.temperature, (double)kdconfig.alpha);
+  } else {
+      LOG_INF("KD off");
+  }
   
   // Declara a estrutura do arquivo nativa do Zephyr
     struct fs_file_t file;
@@ -730,8 +763,39 @@ void NeuralNetworkTraining() {
             }
 
             FeedFoward(neuralnetwork);
-            Error = LossFunctionCalculation(neuralnetwork,label,neuralnetwork->regularization,neuralnetwork->lambda);
-            BackPropagation(neuralnetwork,label,neuralnetwork->alpha,neuralnetwork->regularization,neuralnetwork->lambda);
+
+            if (teacher != NULL) {
+                currentneuron = teacher->firstlayer->firstneuron;
+                for (int i = 0; i < teacher->firstlayer->neurons; i++) {
+                    currentneuron -> activationfunctionvalue = trainingsample[i];
+                    currentneuron = currentneuron -> nextneuron;
+                }
+                FeedFoward(teacher);
+
+                Neuron *studentneuron = neuralnetwork->lastlayer->firstneuron;
+                Neuron *teacherneuron = teacher->lastlayer->firstneuron;
+                for (int i = 0; i < outputs; i++) {
+                    studentlogits[i] = studentneuron->preactivation;
+                    teacherlogits[i] = teacherneuron->preactivation;
+                    studentneuron = studentneuron->nextneuron;
+                    teacherneuron = teacherneuron->nextneuron;
+                }
+
+                Error = KnowledgeDistillationLoss(label, studentlogits, teacherlogits, outputs,
+                                                  kdconfig.temperature, kdconfig.alpha);
+                if (neuralnetwork->regularization == L1) {
+                    Error += LassoRegressionCalculation(neuralnetwork, neuralnetwork->lambda);
+                } else if (neuralnetwork->regularization == L2) {
+                    Error += RidgeRegressionCalculation(neuralnetwork, neuralnetwork->lambda);
+                }
+                KnowledgeDistillationOutputDelta(label, studentlogits, teacherlogits, outputs,
+                                                 kdconfig.temperature, kdconfig.alpha, outputdelta);
+            } else {
+                Error = LossFunctionCalculation(neuralnetwork,label,neuralnetwork->regularization,neuralnetwork->lambda);
+                CrossEntropyOutputDelta(neuralnetwork, label, outputdelta);
+            }
+
+            BackPropagation(neuralnetwork,outputdelta,neuralnetwork->alpha,neuralnetwork->regularization,neuralnetwork->lambda);
             epochloss += Error;
             epochsamples++;
         }

@@ -1,0 +1,30 @@
+mainmenu "Federated Learning node"
+
+menu "Federated learning"
+
+config FL_KNOWLEDGE_DISTILLATION
+	bool "Knowledge distillation from a server-provided teacher"
+	default n
+	help
+	  Distills a teacher model, downloaded from /api/getteachermodel at every round,
+	  into the local model during training. Can also be changed at runtime with
+	  KnowledgeDistillationEnable()/KnowledgeDistillationDisable().
+
+config FL_KD_TEMPERATURE_X10
+	int "Default distillation temperature x10 (30 = 3.0)"
+	default 30
+	range 10 200
+	help
+	  Used when the server does not send "distillation.temperature" with the teacher.
+
+config FL_KD_ALPHA_PERCENT
+	int "Default distillation weight alpha in percent"
+	default 50
+	range 0 100
+	help
+	  Weight of the distillation term; 0 is plain cross-entropy training.
+	  Used when the server does not send "distillation.alpha" with the teacher.
+
+endmenu
+
+source "Kconfig.zephyr"

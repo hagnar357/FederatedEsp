@@ -1,4 +1,4 @@
-#define IP_ADDRESS "192.168.1.195"
+#define IP_ADDRESS "10.238.1.184"
 
 // Training settings
 #define CLIENTS_NUM 2

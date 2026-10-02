@@ -100,6 +100,8 @@ Neuron *CopyNeuron(Neuron *neuronsource){
       newweight->nextweight=NULL;
       newnueron->firstweight=newweight;
       newnueron->lastweight=newweight;
+      currentweight = currentweight->nextweight;
+      continue;
     }
 
     newweight->nextweight=NULL;
@@ -131,6 +133,8 @@ Layer *CopyLayer(Layer *layersource){
       newneuron->nextneuron=NULL;
       newlayer->firstneuron=newneuron;
       newlayer->lastneuron=newneuron;
+      currentneuron = currentneuron->nextneuron;
+      continue;
     }
 
     newneuron->nextneuron=NULL;
@@ -168,6 +172,8 @@ NeuralNetwork *CopyNeuralNetwork(NeuralNetwork* neuralnetworksource){
       newlayer->nextlayer=NULL;
       newneuralnetwork->firstlayer=newlayer;
       newneuralnetwork->lastlayer=newlayer;
+      currentLayer = currentLayer->nextlayer;
+      continue;
     }
 
     newlayer->nextlayer=NULL;
@@ -611,6 +617,11 @@ FederatedLearning *getFederatedLearningInstance() {
         instance.nodecontrol->firstclientnode=NULL;
         instance.nodecontrol->lastclientnode=instance.nodecontrol->firstclientnode;
         instance.nodecontrol->currentinteraction=0;
+        instance.nodecontrol->phase = PHASE_REGISTRATION;
+        instance.nodecontrol->teacherstarttime = 0;
+        instance.nodecontrol->teachertrained = 0;
+        instance.nodecontrol->teachertrainingscounter = 0;
+        instance.nodecontrol->teacherneuralnetwork = (NeuralNetwork *)malloc(sizeof(NeuralNetwork));
         instance.nodecontrol->neuralnetwork = (NeuralNetwork *)malloc(sizeof(NeuralNetwork));
     }
     pthread_mutex_unlock(&singletonMutex);  
@@ -664,6 +675,33 @@ void setFederatedLearningGlobalModel() {
   federatedLearningInstance->nodecontrol->neuralnetwork->percentualtraining = TRAINING_SAMPLES;
 
   federatedLearningInstance->globalmodelstatus=0;
+  federatedLearningInstance->nodecontrol->phase = PHASE_REGISTRATION;
+
+  //teacher task (phase 1): same inputs/outputs as the global model, TEACHER_HIDDEN_LAYERS hidden layers
+  int teacherlayers = 2 + TEACHER_HIDDEN_LAYERS;
+  LayerConfig *teacherconfig = calloc(teacherlayers, sizeof(LayerConfig));
+  for (int i = 0; i < teacherlayers; i++) {
+    teacherconfig[i].first = teacherconfig;
+    teacherconfig[i].next = (i + 1 < teacherlayers) ? &teacherconfig[i + 1] : NULL;
+    if (i == 0) {
+      teacherconfig[i].neurons = layerconfig0->neurons;
+      teacherconfig[i].activationfunctiontype = 0;
+    } else if (i == teacherlayers - 1) {
+      teacherconfig[i].neurons = layerconfig3->neurons;
+      teacherconfig[i].activationfunctiontype = SOFTMAX;
+    } else {
+      teacherconfig[i].neurons = TEACHER_HIDDEN_NEURONS;
+      teacherconfig[i].activationfunctiontype = RELU;
+    }
+  }
+  NeuralNetwork *teacher = federatedLearningInstance->nodecontrol->teacherneuralnetwork;
+  InitializeNeuralNetWork(teacher, teacherlayers, teacherconfig, CATEGORICAL_CROSS_ENTROPY, WEIGHT_VALUE_RANDOM);
+  teacher->epoch = TEACHER_EPOCHS;
+  teacher->alpha = ALPHA;
+  teacher->regularization = L2;
+  teacher->lambda = LAMBDA;
+  teacher->percentualtraining = TRAINING_SAMPLES;
+  free(teacherconfig);
 
   free(layerconfig0);
   free(layerconfig1);
@@ -841,6 +879,31 @@ void SaveModel(int interaction){
   free(jsonstring);
 }
 
+//the trained teacher is saved once, when it arrives, as <run>/teacher.json
+static void SaveTeacherModel(){
+
+  cJSON *json = TeacherModelToJSON();
+  if (json == NULL) {
+    return;
+  }
+  char *jsonstring = cJSON_Print(json);
+
+  char filename[256];
+  snprintf(filename, sizeof(filename), "%s/teacher.json", runModelsDir);
+
+  FILE *modelfile = fopen(filename, "w");
+  if (modelfile != NULL) {
+    fprintf(modelfile, "%s", jsonstring);
+    fclose(modelfile);
+    printf("Teacher saved: %s\n", filename);
+  } else {
+    perror("Erro ao salvar o teacher");
+  }
+
+  cJSON_Delete(json);
+  free(jsonstring);
+}
+
 //check if the client model has exactly the same structure of the global model
 static int ValidateTopology(NeuralNetwork *reference, NeuralNetwork *client){
 
@@ -946,6 +1009,11 @@ int AggregationModel(FederatedLearning * clientmodel, ClientNode * clientnode, i
   FederatedLearning * federatedlearninginstance = getFederatedLearningInstance();
   NodeControl *nodecontrol = federatedlearninginstance->nodecontrol;
 
+  if(nodecontrol->phase != PHASE_FEDERATED){
+    printf("Model from %s rejected: not in phase FEDERATED (phase %s)\n", clientnode->ip_id, PhaseName(nodecontrol->phase));
+    return 0;
+  }
+
   if(nodecontrol->currentinteraction >= nodecontrol->interactioncycle){
     printf("The application reached the max interation\n");
     return 0;
@@ -990,7 +1058,93 @@ int AggregationModel(FederatedLearning * clientmodel, ClientNode * clientnode, i
   return 1;
 }
 
+//////////////////////////////////////////////////PHASES//////////////////////////////////////////////////
+
+const char *PhaseName(int phase){
+  switch (phase) {
+    case PHASE_REGISTRATION: return "registration";
+    case PHASE_TEACHER: return "teacher";
+    case PHASE_FEDERATED: return "federated";
+    default: return "unknown";
+  }
+}
+
+//phase 1: only the teacher client works; the regular nodes keep polling with status 0
+//the caller must hold FederatedLearningLock
+void StartTeacherPhase(){
+  FederatedLearning * federatedlearninginstance = getFederatedLearningInstance();
+  NodeControl *nodecontrol = federatedlearninginstance->nodecontrol;
+
+  nodecontrol->phase = PHASE_TEACHER;
+  nodecontrol->teacherstarttime = time(NULL);
+  federatedlearninginstance->globalmodelstatus = 0;
+  printf("Phase TEACHER: waiting for the teacher client to train the teacher model\n");
+}
+
+//phase 2: federated rounds; the teacher client participates as a regular node
+//the caller must hold FederatedLearningLock
+void StartFederatedPhase(){
+  FederatedLearning * federatedlearninginstance = getFederatedLearningInstance();
+  NodeControl *nodecontrol = federatedlearninginstance->nodecontrol;
+
+  nodecontrol->phase = PHASE_FEDERATED;
+
+  ClientNode *currentclientnode = nodecontrol->firstclientnode;
+  while (currentclientnode!=NULL){
+    currentclientnode->interaction = nodecontrol->currentinteraction;
+    currentclientnode = currentclientnode->nextclientnode;
+  }
+
+  nodecontrol->modelsreceived = 0;
+  nodecontrol->roundstarttime = time(NULL);
+  federatedlearninginstance->globalmodelstatus = 1;
+  printf("Phase FEDERATED: %s\n", nodecontrol->teachertrained ?
+         "teacher available for distillation" : "no teacher, plain federated averaging");
+}
+
+//stores the teacher trained by the teacher client and starts the federated phase
+//returns 1 if accepted; the caller must hold FederatedLearningLock
+int ReceiveTeacherModel(FederatedLearning * teachermodel, ClientNode * clientnode){
+
+  FederatedLearning * federatedlearninginstance = getFederatedLearningInstance();
+  NodeControl *nodecontrol = federatedlearninginstance->nodecontrol;
+
+  if(nodecontrol->phase != PHASE_TEACHER){
+    printf("Teacher from %s rejected: not in phase TEACHER (phase %s)\n", clientnode->ip_id, PhaseName(nodecontrol->phase));
+    return 0;
+  }
+
+  if(!clientnode->isteacher){
+    printf("Teacher from %s rejected: node is not the teacher client\n", clientnode->ip_id);
+    return 0;
+  }
+
+  if(!ValidateTopology(nodecontrol->teacherneuralnetwork, teachermodel->neuralnetwork)){
+    printf("Teacher from %s rejected: topology differs from the teacher task\n", clientnode->ip_id);
+    return 0;
+  }
+
+  if(teachermodel->trainingscounter <= 0){
+    printf("Teacher from %s rejected: invalid trainingscounter %d\n", clientnode->ip_id, teachermodel->trainingscounter);
+    return 0;
+  }
+
+  freeNeuralNetwork(nodecontrol->teacherneuralnetwork);
+  nodecontrol->teacherneuralnetwork = CopyNeuralNetwork(teachermodel->neuralnetwork);
+  nodecontrol->teachertrained = 1;
+  nodecontrol->teachertrainingscounter = teachermodel->trainingscounter;
+  printf("Teacher model received from %s (%d samples)\n", clientnode->ip_id, teachermodel->trainingscounter);
+
+  SaveTeacherModel();
+  //teacher metrics go to metrics.csv with interaction = -1
+  PerformanceMetricsTagged(nodecontrol->teacherneuralnetwork, 30, 0.5, nodecontrol->clientnodes, -1);
+
+  StartFederatedPhase();
+  return 1;
+}
+
 //close the round with the models already received when some node does not answer
+//in phase TEACHER, start the federated phase without a teacher after TEACHER_TIMEOUT_S
 void CheckRoundTimeout(){
 
   FederatedLearningLock();
@@ -998,7 +1152,14 @@ void CheckRoundTimeout(){
   FederatedLearning * federatedlearninginstance = getFederatedLearningInstance();
   NodeControl *nodecontrol = federatedlearninginstance->nodecontrol;
 
-  if(federatedlearninginstance->globalmodelstatus &&
+  if(nodecontrol->phase == PHASE_TEACHER &&
+     time(NULL) - nodecontrol->teacherstarttime >= TEACHER_TIMEOUT_S){
+    printf("Teacher timeout (%d s), starting federated training without teacher\n", TEACHER_TIMEOUT_S);
+    StartFederatedPhase();
+  }
+
+  if(nodecontrol->phase == PHASE_FEDERATED &&
+     federatedlearninginstance->globalmodelstatus &&
      time(NULL) - nodecontrol->roundstarttime >= ROUND_TIMEOUT_S){
 
     if(nodecontrol->modelsreceived == 0){
@@ -1048,6 +1209,12 @@ float F1Score(int truepositive,int falsepositive,int falsenegative){
 }
 
 void PerformanceMetrics(NeuralNetwork * neuralnetwork,int PercentualEvaluation,float Threshold, int clientnodes){
+  PerformanceMetricsTagged(neuralnetwork, PercentualEvaluation, Threshold, clientnodes,
+                           getFederatedLearningInstance()->nodecontrol->currentinteraction);
+}
+
+//interaction: round written in metrics.csv (-1 for the teacher model)
+void PerformanceMetricsTagged(NeuralNetwork * neuralnetwork,int PercentualEvaluation,float Threshold, int clientnodes, int interaction){
   
   int num_data = neuralnetwork->firstlayer->neurons + neuralnetwork->lastlayer->neurons;
   float trainingsample[num_data];
@@ -1138,9 +1305,6 @@ void PerformanceMetrics(NeuralNetwork * neuralnetwork,int PercentualEvaluation,f
   printf("Recall: %.2f\n",Recall(truepositive,falsenegative));
   printf("Specificity: %.2f\n",Specificity(truenegative,falsepositive));
   printf("F1-Score: %.2f\n",F1Score(truepositive,falsepositive,falsenegative));
-
-  FederatedLearning *instance = getFederatedLearningInstance();
-  int interaction = instance->nodecontrol->currentinteraction;
 
   char metricsfilename[256];
   snprintf(metricsfilename, sizeof(metricsfilename), "%s/metrics.csv", runResultsDir);

@@ -1,33 +1,26 @@
 #include "../lib/JSONConverter.h"
 #include "../lib/federatedlearning.h"
+#include "../lib/configs.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
 //FFEDERATED LEARNING TO JSON
-cJSON* FederatedLearningToJSON(FederatedLearning* federatedLearning) {
-    cJSON* root = cJSON_CreateObject();
-    if (!root) return NULL;
-
-    cJSON_AddItemToObject(root, "globalmodelstatus", cJSON_CreateNumber(federatedLearning->globalmodelstatus));
-    cJSON_AddItemToObject(root, "trainingscounter", cJSON_CreateNumber(federatedLearning->trainingscounter));
-    if (federatedLearning->nodecontrol != NULL) {
-        cJSON_AddItemToObject(root, "round", cJSON_CreateNumber(federatedLearning->nodecontrol->currentinteraction));
-    }
-
+//the "neuralnetwork" object shared by the global model, the teacher task and the teacher model
+cJSON* NeuralNetworkToJSON(const NeuralNetwork* neuralnetwork) {
     cJSON* jsonNeuralNetwork = cJSON_CreateObject();
-    cJSON_AddItemToObject(root, "neuralnetwork", jsonNeuralNetwork);
+    if (!jsonNeuralNetwork) return NULL;
 
-    cJSON_AddItemToObject(jsonNeuralNetwork, "epoch", cJSON_CreateNumber(federatedLearning->neuralnetwork->epoch));
-    cJSON_AddItemToObject(jsonNeuralNetwork, "alpha", cJSON_CreateNumber(federatedLearning->neuralnetwork->alpha));
-    cJSON_AddItemToObject(jsonNeuralNetwork, "regularization", cJSON_CreateNumber(federatedLearning->neuralnetwork->regularization));
-    cJSON_AddItemToObject(jsonNeuralNetwork, "lambda", cJSON_CreateNumber(federatedLearning->neuralnetwork->lambda));
-    cJSON_AddItemToObject(jsonNeuralNetwork, "percentualtraining", cJSON_CreateNumber(federatedLearning->neuralnetwork->percentualtraining));
-    cJSON_AddItemToObject(jsonNeuralNetwork, "lossfunctiontype", cJSON_CreateNumber(federatedLearning->neuralnetwork->lossfunctiontype));
-    cJSON_AddItemToObject(jsonNeuralNetwork, "layers", cJSON_CreateNumber(federatedLearning->neuralnetwork->layers));
+    cJSON_AddItemToObject(jsonNeuralNetwork, "epoch", cJSON_CreateNumber(neuralnetwork->epoch));
+    cJSON_AddItemToObject(jsonNeuralNetwork, "alpha", cJSON_CreateNumber(neuralnetwork->alpha));
+    cJSON_AddItemToObject(jsonNeuralNetwork, "regularization", cJSON_CreateNumber(neuralnetwork->regularization));
+    cJSON_AddItemToObject(jsonNeuralNetwork, "lambda", cJSON_CreateNumber(neuralnetwork->lambda));
+    cJSON_AddItemToObject(jsonNeuralNetwork, "percentualtraining", cJSON_CreateNumber(neuralnetwork->percentualtraining));
+    cJSON_AddItemToObject(jsonNeuralNetwork, "lossfunctiontype", cJSON_CreateNumber(neuralnetwork->lossfunctiontype));
+    cJSON_AddItemToObject(jsonNeuralNetwork, "layers", cJSON_CreateNumber(neuralnetwork->layers));
 
     cJSON* layersArray = cJSON_CreateArray();
-    struct Layer* currentLayer = federatedLearning->neuralnetwork->firstlayer;
+    struct Layer* currentLayer = neuralnetwork->firstlayer;
 
     while (currentLayer != NULL) {
         cJSON* layerObject = cJSON_CreateObject();
@@ -64,9 +57,55 @@ cJSON* FederatedLearningToJSON(FederatedLearning* federatedLearning) {
     }
 
     cJSON_AddItemToObject(jsonNeuralNetwork, "layersArray", layersArray);
+    return jsonNeuralNetwork;
+}
+
+//FFEDERATED LEARNING TO JSON
+cJSON* FederatedLearningToJSON(FederatedLearning* federatedLearning) {
+    cJSON* root = cJSON_CreateObject();
+    if (!root) return NULL;
+
+    cJSON_AddItemToObject(root, "globalmodelstatus", cJSON_CreateNumber(federatedLearning->globalmodelstatus));
+    cJSON_AddItemToObject(root, "trainingscounter", cJSON_CreateNumber(federatedLearning->trainingscounter));
+    if (federatedLearning->nodecontrol != NULL) {
+        cJSON_AddItemToObject(root, "round", cJSON_CreateNumber(federatedLearning->nodecontrol->currentinteraction));
+    }
+    cJSON_AddItemToObject(root, "neuralnetwork", NeuralNetworkToJSON(federatedLearning->neuralnetwork));
 
     // Adicione outros campos da estrutura FederatedLearning conforme necessário
 
+    return root;
+}
+
+//TEACHER (phase 1): the untrained teacher task, in the FederatedLearning format so the client
+//parses it with JSONToFederatedLearning
+cJSON* TeacherTaskToJSON() {
+    NodeControl* nodecontrol = getFederatedLearningInstance()->nodecontrol;
+    cJSON* root = cJSON_CreateObject();
+    if (!root) return NULL;
+
+    cJSON_AddNumberToObject(root, "globalmodelstatus", 0);
+    cJSON_AddNumberToObject(root, "trainingscounter", 0);
+    cJSON_AddStringToObject(root, "task", "teacher");
+    cJSON_AddItemToObject(root, "neuralnetwork", NeuralNetworkToJSON(nodecontrol->teacherneuralnetwork));
+    return root;
+}
+
+//TEACHER (phase 2): the trained teacher plus the distillation parameters used by the nodes
+//(contract of GET /api/getteachermodel); NULL while no trained teacher exists
+cJSON* TeacherModelToJSON() {
+    NodeControl* nodecontrol = getFederatedLearningInstance()->nodecontrol;
+    if (!nodecontrol->teachertrained) return NULL;
+
+    cJSON* root = cJSON_CreateObject();
+    if (!root) return NULL;
+
+    cJSON_AddNumberToObject(root, "globalmodelstatus", 1);
+    cJSON_AddNumberToObject(root, "trainingscounter", nodecontrol->teachertrainingscounter);
+    cJSON* distillation = cJSON_AddObjectToObject(root, "distillation");
+    cJSON_AddNumberToObject(distillation, "temperature", KD_TEMPERATURE);
+    cJSON_AddNumberToObject(distillation, "alpha", KD_ALPHA);
+    cJSON_AddItemToObject(root, "neuralnetwork", NeuralNetworkToJSON(nodecontrol->teacherneuralnetwork));
     return root;
 }
 

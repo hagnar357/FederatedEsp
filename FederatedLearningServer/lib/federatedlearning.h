@@ -28,6 +28,11 @@
 #define WEIGHT_VALUE_RANDOM 1
 #define WEIGHT_VALUE_HALF 2
 
+//server phases
+#define PHASE_REGISTRATION 0 //waiting for CLIENTS_NUM nodes
+#define PHASE_TEACHER 1      //the teacher client is training the teacher model
+#define PHASE_FEDERATED 2    //federated rounds
+
 //////////
 
 typedef struct Weight {
@@ -67,6 +72,7 @@ typedef struct NeuralNetwork {
 typedef struct ClientNode{
   char ip_id[INET_ADDRSTRLEN];
   int interaction;
+  int isteacher; //registered with role=teacher: trains the teacher model in phase TEACHER
   struct ClientNode *previousclientnode, *nextclientnode;
 }ClientNode;
 
@@ -77,6 +83,12 @@ typedef struct NodeControl{
   int clientnodesregistered;
   int modelsreceived;
   time_t roundstarttime;
+  int phase;
+  time_t teacherstarttime;
+  //untrained teacher task in phase TEACHER, trained teacher (served to the nodes) afterwards
+  NeuralNetwork *teacherneuralnetwork;
+  int teachertrained;
+  int teachertrainingscounter;
   NeuralNetwork *neuralnetwork;
   struct ClientNode *firstclientnode, *lastclientnode;
 }NodeControl;
@@ -103,8 +115,13 @@ FederatedLearning *getFederatedLearningInstance();
 void PrintNeuralNeuralNetwork(NeuralNetwork * neuralnetwork);
 void setFederatedLearningGlobalModel();
 int AggregationModel(FederatedLearning * clientmodel, ClientNode * clientnode, int round);
+int ReceiveTeacherModel(FederatedLearning * teachermodel, ClientNode * clientnode);
+void StartTeacherPhase();
+void StartFederatedPhase();
+const char *PhaseName(int phase);
 void CheckRoundTimeout();
 void PerformanceMetrics(NeuralNetwork * neuralnetwork,int PercentualEvaluation,float Threshold, int clientnodes);
+void PerformanceMetricsTagged(NeuralNetwork * neuralnetwork,int PercentualEvaluation,float Threshold, int clientnodes, int interaction);
 void SaveModel(int interaction);
 int InitRunOutput();
 void freeNeuralNetwork(NeuralNetwork *neuralnetwork);

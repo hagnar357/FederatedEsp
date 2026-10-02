@@ -20,12 +20,12 @@ extern struct k_sem wifi_connected_sem;
 #define WIFI_PASSWORD   "senha111"
 
 // Configs http
-#define SERVER_IP "10.238.1.184"
+#define SERVER_IP "10.190.120.184"
 #define SERVER_PORT 8888
 
 
 // Configs para o Websocket
-#define WS_SERVER_IP "10.238.1.184"
+#define WS_SERVER_IP "10.190.120.184"
 #define WS_SERVER_PORT 8080
 #define WS_SERVER_PATH "/"
 

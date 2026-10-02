@@ -147,6 +147,8 @@ KnowledgeDistillationGetConfig();          // valores efetivos (os do servidor t
 ```
 
 ### Contrato com o servidor
+O servidor treina o teacher numa fase inicial, através do cliente simulado (`../FederatedLearningTeacherClient`), e depois o disponibiliza em `GET /api/getteachermodel`. Enquanto o teacher está sendo treinado, o nó recebe `status: 0` em `/api/checkglobalmodel` e continua aguardando.
+
 Com a destilação ligada, a cada rodada o nó faz `GET /api/getteachermodel` (uma tentativa, sem repetir em 4xx) antes de treinar. A resposta usa o **mesmo JSON de `/api/getglobalmodel`**, com um objeto opcional de parâmetros:
 ```json
 {

@@ -10,6 +10,10 @@ ROOT_DIR=$(pwd)
 
 ZEPHYR_DIR="FederatedLearningZephyr"
 SERVER_DIR="FederatedLearningServer"
+TEACHER_CLIENT_DIR="FederatedLearningTeacherClient"
+
+# KD=0 desliga a destilação nas placas (o teacher continua sendo treinado pelo cliente simulado)
+KD="${KD:-1}"
 
 # ID único da execução: logs, modelos e métricas vão para subpastas com esse nome
 BASE_RUN_ID="run_$(date +%Y%m%d_%H%M%S)"
@@ -63,14 +67,19 @@ fi
 echo "Placas encontradas:"
 printf '  %s\n' "${TTYS[@]}"
 
-sed -i '/CLIENTS_NUM/c\#define CLIENTS_NUM '${#TTYS[@]}'' \
+# As placas + o cliente simulado (teacher) participam do treino federado
+NUM_BOARDS=${#TTYS[@]}
+NUM_CLIENTS=$((NUM_BOARDS + 1))
+TEACHER_NODE_ID=0
+
+sed -i '/CLIENTS_NUM/c\#define CLIENTS_NUM '$NUM_CLIENTS'' \
         "$SERVER_DIR/lib/configs.h"
 
 # ==========================
-# Separar datasets
+# Separar datasets (uma partição extra para o cliente teacher)
 # ==========================
 
-python3 separate_dataset.py "${#TTYS[@]}"
+python3 separate_dataset.py "$NUM_CLIENTS"
 
 # ==========================
 # Gravar filesystem de cada nó
@@ -83,7 +92,7 @@ for tty in "${TTYS[@]}"; do
     echo "Preparando dataset para nó $NODE_ID ($tty)"
 
     cp \
-      "datasets/dataset_no_${NODE_ID}.csv" \
+      "datasets/dataset_no_${NODE_ID+1}.csv" \
       "$ZEPHYR_DIR/fs_data/dataset.csv"
 
     mklittlefs \
@@ -143,6 +152,25 @@ echo "Servidor PID: $SERVER_PID"
 sleep 3
 
 # ==========================
+# Cliente simulado (treina o teacher e participa do treino federado)
+# ==========================
+
+echo "Compilando cliente teacher..."
+
+make -C "$TEACHER_CLIENT_DIR" build > "$LOG_DIR/teacher_client_build.log" 2>&1
+
+"$TEACHER_CLIENT_DIR/FederatedLearningTeacherClient" \
+    --server "$IP" \
+    --dataset "datasets/dataset_no_${TEACHER_NODE_ID}.csv" \
+    > "$LOG_DIR/teacher_client.log" 2>&1 &
+
+TEACHER_CLIENT_PID=$!
+
+trap 'kill $SERVER_PID $TEACHER_CLIENT_PID 2>/dev/null || true' EXIT
+
+echo "Cliente teacher PID: $TEACHER_CLIENT_PID"
+
+# ==========================
 # Build do firmware
 # ==========================
 
@@ -151,10 +179,13 @@ echo "Compilando firmware Zephyr..."
 cd "$ROOT_DIR"
 cd ..
 
+if [ "$KD" = "1" ]; then KD_CONFIG="y"; else KD_CONFIG="n"; fi
+
 west build \
     -b heltec_wireless_stick_lite_v3/esp32s3/procpu \
     "$ROOT_DIR/$ZEPHYR_DIR" \
-    --pristine 
+    --pristine \
+    -- -DCONFIG_FL_KNOWLEDGE_DISTILLATION=$KD_CONFIG
 
 # ==========================
 # Flash dos nós
@@ -199,6 +230,8 @@ echo "  Logs:      $LOG_DIR"
 echo "  Modelos:   $SERVER_DIR/modelos/$RUN_ID"
 echo "  Métricas:  $SERVER_DIR/resultados/$RUN_ID"
 echo "Servidor PID: $SERVER_PID"
+echo "Cliente teacher PID: $TEACHER_CLIENT_PID (log: $LOG_DIR/teacher_client.log)"
+echo "Destilação nas placas: KD=$KD"
 echo "Monitores: ${MONITOR_PIDS[*]}"
 echo
 

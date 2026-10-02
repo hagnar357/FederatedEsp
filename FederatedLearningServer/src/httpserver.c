@@ -31,12 +31,19 @@ void handle_request(int client_socket,struct sockaddr_in client_address) {
     if (strstr(buffer, "GET /api/checkglobalmodel HTTP/1.1") != NULL){
         handle_get_checkmodelstatus(client_socket,client_ip);
     }
-    else if(strstr(buffer, "GET /api/noderegister HTTP/1.1") != NULL){
-
-        handle_get_noderegister(client_socket,client_ip);
+    else if(strncmp(buffer, "GET /api/noderegister", strlen("GET /api/noderegister")) == 0){
+        //optional query string: /api/noderegister?role=teacher
+        int isteacher = strstr(buffer, "role=teacher") != NULL;
+        handle_get_noderegister(client_socket,client_ip,isteacher);
     }
     else if (strstr(buffer, "GET /api/getglobalmodel HTTP/1.1") != NULL){
         handle_get_globalmodel(client_socket);
+    }
+    else if (strstr(buffer, "GET /api/getteachertask HTTP/1.1") != NULL){
+        handle_get_teachertask(client_socket,client_ip);
+    }
+    else if (strstr(buffer, "GET /api/getteachermodel HTTP/1.1") != NULL){
+        handle_get_teachermodel(client_socket);
     }
     else if (strstr(buffer, "POST /api/postglobalmodel HTTP/1.1") != NULL){
         

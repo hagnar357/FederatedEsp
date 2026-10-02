@@ -7,7 +7,9 @@ void handle_testget_request(int client_socket);
 //page
 void handle_root_request(int client_socket);
 //api
-void handle_get_noderegister(int client_socket,char *ip_addr);
+void handle_get_noderegister(int client_socket,char *ip_addr,int isteacher);
+void handle_get_teachertask(int client_socket,char *ip_addr);
+void handle_get_teachermodel(int client_socket);
 void handle_get_globalmodel(int client_socket);
 void handle_post_globalmodel(int client_socket,const char *request_body);
 void handle_get_checkmodelstatus(int client_socket,char *ip_addr);

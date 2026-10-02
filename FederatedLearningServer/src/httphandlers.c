@@ -16,7 +16,7 @@ void handle_root_request(int client_socket){
 }
 
 void handle_not_found_request(int client_socket) {
-    const char *not_found_response = "HTTP/1.1 404 Not Found\nContent-Type: text/plain\n\n404 Not Found";
+    const char *not_found_response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 13\r\nConnection: close\r\n\r\n404 Not Found";
     printf("404 on socket: %d", client_socket);
     write(client_socket, not_found_response, strlen(not_found_response));
 }
@@ -83,6 +83,57 @@ void handle_get_globalmodel(int client_socket) {
     free(response_str);
 }
 
+static ClientNode *find_client_node(FederatedLearning *instance, const char *ip_addr);
+
+// Phase TEACHER: the untrained teacher task, only for the teacher client
+void handle_get_teachertask(int client_socket, char *ip_addr) {
+    cJSON *json_response = NULL;
+
+    FederatedLearningLock();
+    FederatedLearning *instance = getFederatedLearningInstance();
+    ClientNode *node = find_client_node(instance, ip_addr);
+    if (instance->nodecontrol->phase == PHASE_TEACHER && node != NULL && node->isteacher) {
+        json_response = TeacherTaskToJSON();
+    }
+    FederatedLearningUnlock();
+
+    if (json_response == NULL) {
+        printf("Teacher task refused for %s\n", ip_addr);
+        handle_not_found_request(client_socket);
+        return;
+    }
+
+    char *response_str = cJSON_Print(json_response);
+    cJSON_Delete(json_response);
+    if (response_str == NULL) {
+        handle_not_found_request(client_socket);
+        return;
+    }
+    send_json_response(client_socket, response_str);
+    free(response_str);
+}
+
+// Phase FEDERATED: the trained teacher + distillation parameters (404 while there is no teacher)
+void handle_get_teachermodel(int client_socket) {
+    FederatedLearningLock();
+    cJSON *json_response = TeacherModelToJSON();
+    FederatedLearningUnlock();
+
+    if (json_response == NULL) {
+        handle_not_found_request(client_socket);
+        return;
+    }
+
+    char *response_str = cJSON_Print(json_response);
+    cJSON_Delete(json_response);
+    if (response_str == NULL) {
+        handle_not_found_request(client_socket);
+        return;
+    }
+    send_json_response(client_socket, response_str);
+    free(response_str);
+}
+
 void handle_post_globalmodel(int client_socket, const char *request_body) {
     
     printf("post chegou ao menos\n");
@@ -136,8 +187,17 @@ void handle_get_checkmodelstatus(int client_socket,char *ip_addr){
 
     ClientNode *currentclientnode = find_client_node(FederatedLearningInstance, ip_addr);
 
+    const char *task = "train";
+    int phase = nodecontrol->phase;
+
+    if(phase == PHASE_TEACHER){
+        //only the teacher client works in phase 1, until it sends the teacher back
+        task = "teacher";
+        status = currentclientnode != NULL && currentclientnode->isteacher && !nodecontrol->teachertrained;
+    }
     //the node receives 1 only if all nodes are registered and it did not send the model of this round yet
-    if(nodecontrol->clientnodesregistered == nodecontrol->clientnodes &&
+    else if(phase == PHASE_FEDERATED &&
+       nodecontrol->clientnodesregistered == nodecontrol->clientnodes &&
        currentclientnode != NULL &&
        currentclientnode->interaction == nodecontrol->currentinteraction &&
        FederatedLearningInstance->globalmodelstatus){
@@ -148,6 +208,8 @@ void handle_get_checkmodelstatus(int client_socket,char *ip_addr){
     cJSON *root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "status", status);
     cJSON_AddNumberToObject(root, "round", round);
+    cJSON_AddStringToObject(root, "phase", PhaseName(phase));
+    cJSON_AddStringToObject(root, "task", task);
     char *response_str = cJSON_Print(root);
     cJSON_Delete(root);
 
@@ -162,8 +224,20 @@ void handle_get_checkmodelstatus(int client_socket,char *ip_addr){
 
 
 
-void handle_get_noderegister(int client_socket, char *ip_addr) {
-    printf("Client IP: %s\n", ip_addr);
+static ClientNode *find_teacher_node(FederatedLearning *instance) {
+    ClientNode *currentclientnode = instance->nodecontrol->firstclientnode;
+    while (currentclientnode != NULL) {
+        if (currentclientnode->isteacher) {
+            return currentclientnode;
+        }
+        currentclientnode = currentclientnode->nextclientnode;
+    }
+    return NULL;
+}
+
+// isteacher: the client registered with ?role=teacher and will train the teacher model in phase TEACHER
+void handle_get_noderegister(int client_socket, char *ip_addr, int isteacher) {
+    printf("Client IP: %s%s\n", ip_addr, isteacher ? " (teacher)" : "");
 
     const char *response_str;
 
@@ -171,8 +245,12 @@ void handle_get_noderegister(int client_socket, char *ip_addr) {
     FederatedLearning *fedLearninginstance = getFederatedLearningInstance();
     NodeControl *nodecontrol = fedLearninginstance->nodecontrol;
 
-    if (find_client_node(fedLearninginstance, ip_addr) != NULL) {
+    ClientNode *existing = find_client_node(fedLearninginstance, ip_addr);
+    if (existing != NULL) {
         //already registered nodes can register again (e.g. after a reboot)
+        if (isteacher) {
+            existing->isteacher = 1;
+        }
         response_str = "{\"status\":\"registred\"}";
         printf("Node already Added\n");
     } else if (nodecontrol->clientnodesregistered >= nodecontrol->clientnodes) {
@@ -184,6 +262,7 @@ void handle_get_noderegister(int client_socket, char *ip_addr) {
             response_str = "{\"status\":\"error\"}";
         } else {
             clientnode->interaction = nodecontrol->currentinteraction;
+            clientnode->isteacher = isteacher;
             snprintf(clientnode->ip_id, sizeof(clientnode->ip_id), "%s", ip_addr);
             clientnode->nextclientnode = NULL;
             clientnode->previousclientnode = nodecontrol->lastclientnode;
@@ -200,9 +279,13 @@ void handle_get_noderegister(int client_socket, char *ip_addr) {
             printf("Client node Added\n");
 
             if (nodecontrol->clientnodesregistered == nodecontrol->clientnodes) {
-                //all nodes registered: the first round starts now
-                fedLearninginstance->globalmodelstatus = 1;
-                nodecontrol->roundstarttime = time(NULL);
+                //all nodes registered: train the teacher first if a teacher client exists
+                if (find_teacher_node(fedLearninginstance) != NULL) {
+                    StartTeacherPhase();
+                } else {
+                    printf("No teacher client registered, starting federated training directly\n");
+                    StartFederatedPhase();
+                }
             }
         }
     }

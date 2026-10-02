@@ -21,6 +21,10 @@ void handle_clint_model_message(const char * message, int length,char *ip_addr){
     cJSON *round_item = cJSON_GetObjectItem(json_model, "round");
     int round = cJSON_IsNumber(round_item) ? round_item->valueint : -1;
 
+    // "type": "teacher" carries the teacher trained in phase TEACHER; anything else is a local model
+    cJSON *type_item = cJSON_GetObjectItem(json_model, "type");
+    int isteachermessage = cJSON_IsString(type_item) && strcmp(type_item->valuestring, "teacher") == 0;
+
     FederatedLearning *clientmodel = JSONToFederatedLearning(json_model);
     cJSON_Delete(json_model);
 
@@ -43,6 +47,8 @@ void handle_clint_model_message(const char * message, int length,char *ip_addr){
 
     if (currentclientnode == NULL) {
         printf("Model from %s rejected: node not registered\n", ip_addr);
+    } else if (isteachermessage) {
+        ReceiveTeacherModel(clientmodel, currentclientnode);
     } else {
         AggregationModel(clientmodel, currentclientnode, round);
     }

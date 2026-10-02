@@ -3,7 +3,11 @@ FederatedLearningESP32/build
 FederatedLearningESP32/.devcontainer
 FederatedLearningESP32/.vscode
 FederatedLearningServer/.vscode
-FederatedLearningServer/.build
+*/.build
 FederatedLearningServer/FederatedLearningServer
+FederatedLearningServer/modelos
+FederatedLearningServer/resultados
+FederatedLearningTeacherClient/FederatedLearningTeacherClient
+log_run
 
 

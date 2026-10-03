@@ -61,6 +61,7 @@ def particionar_non_iid_dirichlet(
 if __name__ == "__main__":
 
     num_clientes = int(sys.argv[1])
+    teacher_node_part = float(sys.argv[2]) if len(sys.argv) > 2 else None
 
     # ---------------------------------------------------------
     data = pl.read_csv("FederatedLearningZephyr/data/dataset_full.csv", has_header=False, new_columns=["id", "x1", "x2", "x3", "x4", "y0", "y1", "y2"])
@@ -71,11 +72,50 @@ if __name__ == "__main__":
     # 2. Alimentar as funções de particionamento
     # ---------------------------------------------------------
     # Agora você passa o array 1D para a função
-    indices_distribuidos = particionar_non_iid_dirichlet(
-        labels=labels_inteiros,
-        num_clientes=num_clientes, 
+
+    # tirando um dataset balanceado para o teacher
+    labels_inteiros = np.asarray(labels_inteiros)
+    indices_restantes = np.arange(len(labels_inteiros))
+    indices_teacher = None
+
+    if teacher_node_part is not None:
+        if not 0 < teacher_node_part < 1:
+            raise ValueError("A partição do teacher deve ser um float entre 0 e 1")
+
+        num_clientes -= 1  # o teacher ocupa um dos nós (índice 0)
+        rng_teacher = np.random.default_rng(42)
+        classes = np.unique(labels_inteiros)
+        menor_classe = min(int(np.sum(labels_inteiros == k)) for k in classes)
+
+        # Mesmo número de amostras por classe (balanceado), limitado pela menor classe
+        por_classe = min(int(teacher_node_part * len(labels_inteiros) / len(classes)), menor_classe)
+        if por_classe < 1:
+            raise ValueError("Partição do teacher muito pequena para gerar amostras balanceadas")
+
+        escolhidos = []
+        for k in classes:
+            idx_k = np.where(labels_inteiros == k)[0]
+            escolhidos.extend(rng_teacher.choice(idx_k, size=por_classe, replace=False).tolist())
+
+        indices_teacher = np.array(escolhidos)
+        rng_teacher.shuffle(indices_teacher)
+
+        # Remove as amostras do teacher antes da distribuição Dirichlet
+        indices_restantes = np.setdiff1d(indices_restantes, indices_teacher)
+
+    # Dirichlet sobre o restante; converte índices locais de volta para os globais
+    particoes = particionar_non_iid_dirichlet(
+        labels=labels_inteiros[indices_restantes],
+        num_clientes=num_clientes,
         alpha=0.5
     )
+
+    deslocamento = 1 if indices_teacher is not None else 0
+    indices_distribuidos = {}
+    if indices_teacher is not None:
+        indices_distribuidos[0] = indices_teacher
+    for cliente_id, indices in particoes.items():
+        indices_distribuidos[cliente_id + deslocamento] = indices_restantes[indices]
 
     # ---------------------------------------------------------
     # 2. Preparando a exportação

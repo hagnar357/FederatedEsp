@@ -323,6 +323,8 @@ case SIGMOID:
 case SOFTMAX:
   //keeps Z, the whole layer is normalized by SoftMaxLayer
   return Z;
+case LINEAR:
+  return Z;
 default:
   return 0;
 }
@@ -339,7 +341,8 @@ case 2:
   return ReLUDerivative(a);
 case 3:
   return SigmoidDerivative(a); 
-  
+case LINEAR:
+  return 1;
   default:
     return 0;
   }
@@ -434,6 +437,16 @@ float LassoRegressionCalculation(NeuralNetwork *neuralnetwork,float lambda){
   return sum*lambda;
 }
 
+//mean squared error between the network output and labelvector (used by the autoencoder teacher)
+float MeanSquaredError(float *labelvector, float *output, int outputsize){
+  float sum = 0;
+  for (int i = 0; i < outputsize; i++) {
+    float diff = output[i] - labelvector[i];
+    sum += diff * diff;
+  }
+  return sum / outputsize;
+}
+
 float LossFunctionCalculation(NeuralNetwork * neuralnetwork, float *labelvector, int regularization,float lambda){  
   
   float outputdata[neuralnetwork -> lastlayer->neurons];
@@ -447,7 +460,14 @@ float LossFunctionCalculation(NeuralNetwork * neuralnetwork, float *labelvector,
 
   switch (neuralnetwork->lossfunctiontype){
   case MINIMAL_MEAN_SQUARE:
-    break;
+    switch (regularization){
+      case 1:
+        return MeanSquaredError(labelvector, outputdata, neuralnetwork->lastlayer->neurons) + LassoRegressionCalculation(neuralnetwork,lambda);
+      case 2:
+        return MeanSquaredError(labelvector, outputdata, neuralnetwork->lastlayer->neurons) + RidgeRegressionCalculation(neuralnetwork,lambda);
+      default:
+        return MeanSquaredError(labelvector, outputdata, neuralnetwork->lastlayer->neurons);
+    }
   
   case CATEGORICAL_CROSS_ENTROPY:
 
@@ -522,9 +542,22 @@ void CrossEntropyOutputDelta(NeuralNetwork *neuralnetwork, const float *label, f
   }
 }
 
-//outputdelta: gradient of the loss w.r.t. the output layer pre-activations (e.g. CrossEntropyOutputDelta
-//or KnowledgeDistillationOutputDelta)
-void BackPropagation(NeuralNetwork *neuralnetwork, const float *outputdelta, float alpha, int regularization, float lambda){
+//output delta of a LINEAR output layer trained with mean squared error: d(MSE)/dZ = (2/n) * (output - label)
+//used by the autoencoder teacher to reconstruct its own input
+void ReconstructionOutputDelta(NeuralNetwork *neuralnetwork, const float *label, float *delta){
+  Neuron *currentneuron = neuralnetwork->lastlayer->firstneuron;
+  int count = neuralnetwork->lastlayer->neurons;
+  for (int i = 0; i < count; i++) {
+    delta[i] = (2.0f / count) * (currentneuron->activationfunctionvalue - label[i]);
+    currentneuron = currentneuron->nextneuron;
+  }
+}
+
+//outputdelta: gradient of the loss w.r.t. the output layer pre-activations (e.g. CrossEntropyOutputDelta,
+//ReconstructionOutputDelta or KnowledgeDistillationOutputDelta)
+//hintdelta: optional (NULL if unused) extra gradient added at the layer right before the output layer,
+//e.g. KnowledgeDistillationFeatureDelta for latent-layer knowledge distillation
+void BackPropagation(NeuralNetwork *neuralnetwork, const float *outputdelta, float alpha, int regularization, float lambda, const float *hintdelta){
   //printf("BACKPROPAGATION\n");
       
   //aux memory 
@@ -610,11 +643,23 @@ void BackPropagation(NeuralNetwork *neuralnetwork, const float *outputdelta, flo
         currentneuron = currentneuron->nextneuron;
       }
 
+      //hint-based (latent layer) knowledge distillation: add the extra gradient at the layer right
+      //before the output layer, before it is used to update this layer's incoming weights
+      if (hintdelta != NULL && layer == neuralnetwork->layers - 1) {
+        for (int i = 0; i < currentlayer->neurons; i++) {
+          deltafunctions[i] += hintdelta[i];
+        }
+      }
+
       freeMatrix(weights,weightslines);
 
+      //deltafunctions[] was just filled with currentlayer->neurons valid entries: that is the size
+      //the NEXT iteration must copy into deltafunctionsaux, regardless of the layer two steps back
+      //(weightslines/weightscolumn below size the weight matrix for the next iteration instead, and
+      //only coincidentally matched this when every hidden layer had the same width)
+      deltafunctionsnumber = currentlayer -> neurons;
       weightscolumn = weightslines;
       weightslines = currentlayer -> previouslayer -> neurons;
-      deltafunctionsnumber = weightslines;
           
       //printf("wl %d wc %d\n",weightslines,weightscolumn);
           
@@ -676,6 +721,11 @@ void NeuralNetworkTraining() {
   float Error = 0.0;
   int trainedsamples = 0;
 
+  // autoencoder training (the teacher's own phase-1 training): the CSV's class columns are not read,
+  // and the reconstruction target is the input itself
+  int autoencoder = (neuralnetwork->lossfunctiontype == MINIMAL_MEAN_SQUARE);
+  int csvfields = autoencoder ? neuralnetwork->firstlayer->neurons : num_data;
+
   char line[1024];
   Neuron * currentneuron = NULL;
 
@@ -703,8 +753,19 @@ void NeuralNetworkTraining() {
           teacher = KnowledgeDistillationGetTeacher();
       }
   }
+  // KD_MODE_LATENT distills the student's last hidden layer; sized once, reused per sample
+  int hintwidth = (teacher != NULL && kdconfig.mode == KD_MODE_LATENT) ?
+                  neuralnetwork->lastlayer->previouslayer->neurons : 0;
+  float studenthidden[hintwidth > 0 ? hintwidth : 1];
+  float teacherhidden[hintwidth > 0 ? hintwidth : 1];
+  float hintdeltabuf[hintwidth > 0 ? hintwidth : 1];
+
   if (teacher != NULL) {
-      LOG_INF("KD on (T=%.2f, alpha=%.2f)", (double)kdconfig.temperature, (double)kdconfig.alpha);
+      if (kdconfig.mode == KD_MODE_LATENT) {
+          LOG_INF("KD on (mode=latent, alpha=%.2f)", (double)kdconfig.alpha);
+      } else {
+          LOG_INF("KD on (mode=logit, T=%.2f, alpha=%.2f)", (double)kdconfig.temperature, (double)kdconfig.alpha);
+      }
   } else {
       LOG_INF("KD off");
   }
@@ -738,14 +799,14 @@ void NeuralNetworkTraining() {
             char * token = strtok(line, ","); 
             int fields = 0;
 
-            for (int i = 0; i < num_data && token != NULL; i++){
+            for (int i = 0; i < csvfields && token != NULL; i++){
                 trainingsample[i] = strtof(token, NULL);
                 fields++;
                 token = strtok(NULL, ",");
             }
 
             // linha vazia ou incompleta: não treina com valores da linha anterior
-            if (fields != num_data) {
+            if (fields != csvfields) {
                 invalidlines++;
                 continue;
             }
@@ -757,14 +818,69 @@ void NeuralNetworkTraining() {
                 currentneuron = currentneuron -> nextneuron;
             }
 
-            //set the label on label vector
-            for (int i = neuralnetwork->firstlayer->neurons; i < num_data; i++) {
-                label[i - neuralnetwork->firstlayer->neurons] = trainingsample[i];
+            //set the label on label vector: the autoencoder reconstructs its own input, the
+            //classifier reads the one-hot label from the CSV's remaining columns
+            if (autoencoder) {
+                for (int i = 0; i < neuralnetwork->lastlayer->neurons; i++) {
+                    label[i] = trainingsample[i];
+                }
+            } else {
+                for (int i = neuralnetwork->firstlayer->neurons; i < csvfields; i++) {
+                    label[i - neuralnetwork->firstlayer->neurons] = trainingsample[i];
+                }
             }
 
             FeedFoward(neuralnetwork);
 
-            if (teacher != NULL) {
+            if (teacher != NULL && kdconfig.mode == KD_MODE_LATENT) {
+                currentneuron = teacher->firstlayer->firstneuron;
+                for (int i = 0; i < teacher->firstlayer->neurons; i++) {
+                    currentneuron -> activationfunctionvalue = trainingsample[i];
+                    currentneuron = currentneuron -> nextneuron;
+                }
+                FeedFoward(teacher);
+
+                //student's last hidden layer vs. teacher's latent layer, both post-activation
+                Neuron *studentneuron = neuralnetwork->lastlayer->previouslayer->firstneuron;
+                for (int i = 0; i < hintwidth; i++) {
+                    studenthidden[i] = studentneuron->activationfunctionvalue;
+                    studentneuron = studentneuron->nextneuron;
+                }
+                Layer *teacherlatentlayer = teacher->firstlayer;
+                for (int i = 0; i < kdconfig.latentlayerindex; i++) {
+                    teacherlatentlayer = teacherlatentlayer->nextlayer;
+                }
+                Neuron *teacherneuron = teacherlatentlayer->firstneuron;
+                for (int i = 0; i < hintwidth; i++) {
+                    teacherhidden[i] = teacherneuron->activationfunctionvalue;
+                    teacherneuron = teacherneuron->nextneuron;
+                }
+
+                CrossEntropyOutputDelta(neuralnetwork, label, outputdelta);
+                for (int i = 0; i < outputs; i++) {
+                    outputdelta[i] *= (1 - kdconfig.alpha);
+                }
+
+                Error = (1 - kdconfig.alpha) * LossFunctionCalculation(neuralnetwork, label, NONE_REGULARIZATION, 0)
+                      + kdconfig.alpha * KnowledgeDistillationFeatureLoss(studenthidden, teacherhidden, hintwidth);
+                if (neuralnetwork->regularization == L1) {
+                    Error += LassoRegressionCalculation(neuralnetwork, neuralnetwork->lambda);
+                } else if (neuralnetwork->regularization == L2) {
+                    Error += RidgeRegressionCalculation(neuralnetwork, neuralnetwork->lambda);
+                }
+
+                //KnowledgeDistillationFeatureDelta gives dLoss/d(activation); the chain rule needs one
+                //more multiply by the hint layer's own activation derivative to get dLoss/d(preactivation),
+                //which is what deltafunctions[] (and therefore hintdelta) represents in BackPropagation
+                KnowledgeDistillationFeatureDelta(studenthidden, teacherhidden, hintwidth, hintdeltabuf);
+                for (int i = 0; i < hintwidth; i++) {
+                    hintdeltabuf[i] *= kdconfig.alpha *
+                        ActivationFunctionDerivativeCalculation(studenthidden[i], neuralnetwork->lastlayer->previouslayer->activationfunctiontype);
+                }
+
+                BackPropagation(neuralnetwork,outputdelta,neuralnetwork->alpha,neuralnetwork->regularization,neuralnetwork->lambda,hintdeltabuf);
+            } else if (teacher != NULL) {
+                // KD_MODE_LOGIT
                 currentneuron = teacher->firstlayer->firstneuron;
                 for (int i = 0; i < teacher->firstlayer->neurons; i++) {
                     currentneuron -> activationfunctionvalue = trainingsample[i];
@@ -790,12 +906,18 @@ void NeuralNetworkTraining() {
                 }
                 KnowledgeDistillationOutputDelta(label, studentlogits, teacherlogits, outputs,
                                                  kdconfig.temperature, kdconfig.alpha, outputdelta);
+
+                BackPropagation(neuralnetwork,outputdelta,neuralnetwork->alpha,neuralnetwork->regularization,neuralnetwork->lambda,NULL);
+            } else if (autoencoder) {
+                Error = LossFunctionCalculation(neuralnetwork,label,neuralnetwork->regularization,neuralnetwork->lambda);
+                ReconstructionOutputDelta(neuralnetwork, label, outputdelta);
+                BackPropagation(neuralnetwork,outputdelta,neuralnetwork->alpha,neuralnetwork->regularization,neuralnetwork->lambda,NULL);
             } else {
                 Error = LossFunctionCalculation(neuralnetwork,label,neuralnetwork->regularization,neuralnetwork->lambda);
                 CrossEntropyOutputDelta(neuralnetwork, label, outputdelta);
+                BackPropagation(neuralnetwork,outputdelta,neuralnetwork->alpha,neuralnetwork->regularization,neuralnetwork->lambda,NULL);
             }
 
-            BackPropagation(neuralnetwork,outputdelta,neuralnetwork->alpha,neuralnetwork->regularization,neuralnetwork->lambda);
             epochloss += Error;
             epochsamples++;
         }

@@ -9,6 +9,9 @@
 //output activation function
 #define SOFTMAX 4
 
+//identity activation, used for the autoencoder teacher's reconstruction layer
+#define LINEAR 5
+
 //loss function
 #define MINIMAL_MEAN_SQUARE 1
 #define CATEGORICAL_CROSS_ENTROPY 2
@@ -72,8 +75,11 @@ void PrintNeuralNetwork(NeuralNetwork * neuralnetwork);
 //void NeuralNetworkTraining(NeuralNetwork * neuralnetwork, float LearningRate,int epoch,int PercentualTraining);
 void NeuralNetworkTraining();
 void FeedFoward(NeuralNetwork * neuralnetwork);
-void BackPropagation(NeuralNetwork *neuralnetwork, const float *outputdelta, float alpha, int regularization, float lambda);
+float ActivationFunctionCalculaton(float Z, int activationfunctiontype);
+float ActivationFunctionDerivativeCalculation(float a, int activationfunctiontype);
+void BackPropagation(NeuralNetwork *neuralnetwork, const float *outputdelta, float alpha, int regularization, float lambda, const float *hintdelta);
 void CrossEntropyOutputDelta(NeuralNetwork *neuralnetwork, const float *label, float *delta);
+void ReconstructionOutputDelta(NeuralNetwork *neuralnetwork, const float *label, float *delta);
 float RidgeRegressionCalculation(NeuralNetwork *neuralnetwork,float lambda);
 float LassoRegressionCalculation(NeuralNetwork *neuralnetwork,float lambda);
 float LossFunctionCalculation(NeuralNetwork * neuralnetwork, float *labelvector, int regularization,float lambda);

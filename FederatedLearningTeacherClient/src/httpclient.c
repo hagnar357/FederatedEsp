@@ -217,12 +217,22 @@ int getteachermodel(void) {
         return -1;
     }
 
+    int mode = KD_MODE_LOGIT;
+    int latentlayerindex = -1;
     float temperature = 0;
     float alpha = -1;
     cJSON *distillation = cJSON_GetObjectItem(req, "distillation");
     if (cJSON_IsObject(distillation)) {
+        cJSON *mode_item = cJSON_GetObjectItem(distillation, "mode");
+        cJSON *latentlayerindex_item = cJSON_GetObjectItem(distillation, "latentlayerindex");
         cJSON *temperature_item = cJSON_GetObjectItem(distillation, "temperature");
         cJSON *alpha_item = cJSON_GetObjectItem(distillation, "alpha");
+        if (cJSON_IsString(mode_item) && strcmp(mode_item->valuestring, "latent") == 0) {
+            mode = KD_MODE_LATENT;
+        }
+        if (cJSON_IsNumber(latentlayerindex_item)) {
+            latentlayerindex = latentlayerindex_item->valueint;
+        }
         if (cJSON_IsNumber(temperature_item)) temperature = (float)temperature_item->valuedouble;
         if (cJSON_IsNumber(alpha_item)) alpha = (float)alpha_item->valuedouble;
     }
@@ -230,7 +240,7 @@ int getteachermodel(void) {
     FederatedLearning *teacher = JSONToFederatedLearning(req);
     cJSON_Delete(req);
     if (teacher != NULL) {
-        ret = KnowledgeDistillationSetTeacher(teacher, temperature, alpha);
+        ret = KnowledgeDistillationSetTeacher(teacher, mode, temperature, alpha, latentlayerindex);
     } else {
         printf("<err> Invalid teacher model\n");
     }

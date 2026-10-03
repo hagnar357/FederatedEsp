@@ -14,6 +14,9 @@
 //output activation function
 #define SOFTMAX 4
 
+//identity activation, used for the autoencoder teacher's reconstruction layer
+#define LINEAR 5
+
 //loss function
 #define MINIMAL_MEAN_SQUARE 1
 #define CATEGORICAL_CROSS_ENTROPY 2
@@ -89,6 +92,8 @@ typedef struct NodeControl{
   NeuralNetwork *teacherneuralnetwork;
   int teachertrained;
   int teachertrainingscounter;
+  //0-based index of the teacher's latent/bottleneck layer (TEACHER_ARCH_ENCODER_DECODER only), -1 otherwise
+  int teacherlatentlayerindex;
   NeuralNetwork *neuralnetwork;
   struct ClientNode *firstclientnode, *lastclientnode;
 }NodeControl;
@@ -122,6 +127,7 @@ const char *PhaseName(int phase);
 void CheckRoundTimeout();
 void PerformanceMetrics(NeuralNetwork * neuralnetwork,int PercentualEvaluation,float Threshold, int clientnodes);
 void PerformanceMetricsTagged(NeuralNetwork * neuralnetwork,int PercentualEvaluation,float Threshold, int clientnodes, int interaction);
+void TeacherReconstructionMetrics(NeuralNetwork * teacher);
 void SaveModel(int interaction);
 int InitRunOutput();
 void freeNeuralNetwork(NeuralNetwork *neuralnetwork);

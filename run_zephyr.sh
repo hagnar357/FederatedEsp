@@ -6,6 +6,14 @@ set -e
 # Configurações
 # ==========================
 
+# Uso: ./run_zephyr.sh [fração_teacher]   (float entre 0 e 1, opcional)
+TEACHER_PART="${1:-}"
+
+if [ -n "$TEACHER_PART" ] && ! awk -v v="$TEACHER_PART" 'BEGIN { exit !(v > 0 && v < 1) }'; then
+    echo "Erro: fração do teacher deve ser um número entre 0 e 1 (recebido: $TEACHER_PART)"
+    exit 1
+fi
+
 ROOT_DIR=$(pwd)
 
 ZEPHYR_DIR="FederatedLearningZephyr"
@@ -79,7 +87,9 @@ sed -i '/CLIENTS_NUM/c\#define CLIENTS_NUM '$NUM_CLIENTS'' \
 # Separar datasets (uma partição extra para o cliente teacher)
 # ==========================
 
-python3 separate_dataset.py "$NUM_CLIENTS"
+# Se TEACHER_PART (float entre 0 e 1) for informado, o teacher recebe um dataset balanceado
+# com essa fração do total, retirado antes da distribuição Dirichlet dos demais nós.
+python3 separate_dataset.py "$NUM_CLIENTS" ${TEACHER_PART:+"$TEACHER_PART"}
 
 # ==========================
 # Gravar filesystem de cada nó
@@ -92,7 +102,7 @@ for tty in "${TTYS[@]}"; do
     echo "Preparando dataset para nó $NODE_ID ($tty)"
 
     cp \
-      "datasets/dataset_no_${NODE_ID+1}.csv" \
+      "datasets/dataset_no_$((NODE_ID + 1)).csv" \
       "$ZEPHYR_DIR/fs_data/dataset.csv"
 
     mklittlefs \

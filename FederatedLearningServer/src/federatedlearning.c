@@ -368,6 +368,16 @@ float LassoRegressionCalculation(NeuralNetwork *neuralnetwork,float lambda){
   return sum*lambda;
 }
 
+//mean squared error between the network output and labelvector (used by the autoencoder teacher)
+float MeanSquaredError(float *labelvector, float *output, int outputsize){
+  float sum = 0;
+  for (int i = 0; i < outputsize; i++) {
+    float diff = output[i] - labelvector[i];
+    sum += diff * diff;
+  }
+  return sum / outputsize;
+}
+
 float LossFunctionCalculation(NeuralNetwork * neuralnetwork, float *labelvector, int regularization,float lambda){  
   
   float outputdata[neuralnetwork -> lastlayer->neurons];
@@ -381,7 +391,14 @@ float LossFunctionCalculation(NeuralNetwork * neuralnetwork, float *labelvector,
 
   switch (neuralnetwork->lossfunctiontype){
   case MINIMAL_MEAN_SQUARE:
-    break;
+    switch (regularization){
+      case 1:
+        return MeanSquaredError(labelvector, outputdata, neuralnetwork->lastlayer->neurons) + LassoRegressionCalculation(neuralnetwork,lambda);
+      case 2:
+        return MeanSquaredError(labelvector, outputdata, neuralnetwork->lastlayer->neurons) + RidgeRegressionCalculation(neuralnetwork,lambda);
+      default:
+        return MeanSquaredError(labelvector, outputdata, neuralnetwork->lastlayer->neurons);
+    }
   
   case CATEGORICAL_CROSS_ENTROPY:
 
@@ -425,6 +442,8 @@ switch (activationfunctiontype){
     return Sigmoid(Z);
   case SOFTMAX:
     //keeps Z, the whole layer is normalized by SoftMaxLayer
+    return Z;
+  case LINEAR:
     return Z;
   default:
     return 0;
@@ -621,6 +640,7 @@ FederatedLearning *getFederatedLearningInstance() {
         instance.nodecontrol->teacherstarttime = 0;
         instance.nodecontrol->teachertrained = 0;
         instance.nodecontrol->teachertrainingscounter = 0;
+        instance.nodecontrol->teacherlatentlayerindex = -1;
         instance.nodecontrol->teacherneuralnetwork = (NeuralNetwork *)malloc(sizeof(NeuralNetwork));
         instance.nodecontrol->neuralnetwork = (NeuralNetwork *)malloc(sizeof(NeuralNetwork));
     }
@@ -677,7 +697,49 @@ void setFederatedLearningGlobalModel() {
   federatedLearningInstance->globalmodelstatus=0;
   federatedLearningInstance->nodecontrol->phase = PHASE_REGISTRATION;
 
-  //teacher task (phase 1): same inputs/outputs as the global model, TEACHER_HIDDEN_LAYERS hidden layers
+  NeuralNetwork *teacher = federatedLearningInstance->nodecontrol->teacherneuralnetwork;
+
+#if TEACHER_ARCHITECTURE == TEACHER_ARCH_ENCODER_DECODER
+
+  //pure autoencoder teacher (phase 1): Input -> encoder -> latent (KD point) -> decoder -> reconstruction.
+  //Never sees the class labels; trained only to reconstruct its own input (MINIMAL_MEAN_SQUARE).
+  if (TEACHER_LATENT_NEURONS != layerconfig2->neurons) {
+    fprintf(stderr, "WARNING: TEACHER_LATENT_NEURONS (%d) differs from the global model's last hidden "
+            "layer width (%d); latent-layer knowledge distillation will be rejected by the nodes.\n",
+            TEACHER_LATENT_NEURONS, layerconfig2->neurons);
+  }
+
+  int teacherlayers = 3 + TEACHER_ENCODER_LAYERS + TEACHER_DECODER_LAYERS;
+  LayerConfig *teacherconfig = calloc(teacherlayers, sizeof(LayerConfig));
+  int latentindex = 1 + TEACHER_ENCODER_LAYERS;
+  for (int i = 0; i < teacherlayers; i++) {
+    teacherconfig[i].first = teacherconfig;
+    teacherconfig[i].next = (i + 1 < teacherlayers) ? &teacherconfig[i + 1] : NULL;
+    if (i == 0) {
+      teacherconfig[i].neurons = layerconfig0->neurons;
+      teacherconfig[i].activationfunctiontype = 0;
+    } else if (i == teacherlayers - 1) {
+      //reconstruction layer: same width as the teacher's own input, identity activation
+      teacherconfig[i].neurons = layerconfig0->neurons;
+      teacherconfig[i].activationfunctiontype = LINEAR;
+    } else if (i == latentindex) {
+      teacherconfig[i].neurons = TEACHER_LATENT_NEURONS;
+      teacherconfig[i].activationfunctiontype = RELU;
+    } else if (i < latentindex) {
+      teacherconfig[i].neurons = TEACHER_ENCODER_NEURONS;
+      teacherconfig[i].activationfunctiontype = RELU;
+    } else {
+      teacherconfig[i].neurons = TEACHER_DECODER_NEURONS;
+      teacherconfig[i].activationfunctiontype = RELU;
+    }
+  }
+  InitializeNeuralNetWork(teacher, teacherlayers, teacherconfig, MINIMAL_MEAN_SQUARE, WEIGHT_VALUE_RANDOM);
+  federatedLearningInstance->nodecontrol->teacherlatentlayerindex = latentindex;
+  free(teacherconfig);
+
+#else
+
+  //classifier teacher (phase 1): same inputs/outputs as the global model, TEACHER_HIDDEN_LAYERS hidden layers
   int teacherlayers = 2 + TEACHER_HIDDEN_LAYERS;
   LayerConfig *teacherconfig = calloc(teacherlayers, sizeof(LayerConfig));
   for (int i = 0; i < teacherlayers; i++) {
@@ -694,14 +756,17 @@ void setFederatedLearningGlobalModel() {
       teacherconfig[i].activationfunctiontype = RELU;
     }
   }
-  NeuralNetwork *teacher = federatedLearningInstance->nodecontrol->teacherneuralnetwork;
   InitializeNeuralNetWork(teacher, teacherlayers, teacherconfig, CATEGORICAL_CROSS_ENTROPY, WEIGHT_VALUE_RANDOM);
+  federatedLearningInstance->nodecontrol->teacherlatentlayerindex = -1;
+  free(teacherconfig);
+
+#endif
+
   teacher->epoch = TEACHER_EPOCHS;
   teacher->alpha = ALPHA;
   teacher->regularization = L2;
   teacher->lambda = LAMBDA;
   teacher->percentualtraining = TRAINING_SAMPLES;
-  free(teacherconfig);
 
   free(layerconfig0);
   free(layerconfig1);
@@ -1136,8 +1201,13 @@ int ReceiveTeacherModel(FederatedLearning * teachermodel, ClientNode * clientnod
   printf("Teacher model received from %s (%d samples)\n", clientnode->ip_id, teachermodel->trainingscounter);
 
   SaveTeacherModel();
-  //teacher metrics go to metrics.csv with interaction = -1
-  PerformanceMetricsTagged(nodecontrol->teacherneuralnetwork, 30, 0.5, nodecontrol->clientnodes, -1);
+  if (nodecontrol->teacherlatentlayerindex >= 0) {
+    //the autoencoder teacher has no classification output: report reconstruction error instead
+    TeacherReconstructionMetrics(nodecontrol->teacherneuralnetwork);
+  } else {
+    //teacher metrics go to metrics.csv with interaction = -1
+    PerformanceMetricsTagged(nodecontrol->teacherneuralnetwork, 30, 0.5, nodecontrol->clientnodes, -1);
+  }
 
   StartFederatedPhase();
   return 1;
@@ -1214,6 +1284,69 @@ void PerformanceMetrics(NeuralNetwork * neuralnetwork,int PercentualEvaluation,f
 }
 
 //interaction: round written in metrics.csv (-1 for the teacher model)
+//evaluates the autoencoder teacher by reconstruction error (no classification labels involved);
+//prints the result instead of writing it to metrics.csv, whose columns are classification-specific
+void TeacherReconstructionMetrics(NeuralNetwork *teacher){
+
+  int inputs = teacher->firstlayer->neurons;
+  float trainingsample[inputs];
+  float reconstruction[teacher->lastlayer->neurons];
+  Neuron *currentneuron;
+
+  FILE *file = fopen("data/datasetevaluation.csv", "r");
+  if (file == NULL) {
+    perror("Erro ao abrir o arquivo");
+    return;
+  }
+
+  int samples = 0;
+  float totalloss = 0;
+  char line[1024];
+
+  while (fgets(line, sizeof(line), file) != NULL) {
+
+    // a primeira coluna é o id, descartada
+    char *token = strtok(line, ",");
+    int fields = 0;
+
+    for (int i = 0; i < inputs; i++) {
+      token = strtok(NULL, ",");
+      if (token == NULL) {
+        break;
+      }
+      trainingsample[i] = strtof(token, NULL);
+      fields++;
+    }
+
+    if (fields != inputs) {
+      continue;
+    }
+    samples++;
+
+    currentneuron = teacher->firstlayer->firstneuron;
+    for (int i = 0; i < inputs; i++) {
+      currentneuron->activationfunctionvalue = trainingsample[i];
+      currentneuron = currentneuron->nextneuron;
+    }
+
+    FeedFoward(teacher);
+
+    currentneuron = teacher->lastlayer->firstneuron;
+    for (int i = 0; i < teacher->lastlayer->neurons; i++) {
+      reconstruction[i] = currentneuron->activationfunctionvalue;
+      currentneuron = currentneuron->nextneuron;
+    }
+
+    //reconstruction target is the teacher's own input (trainingsample)
+    totalloss += MeanSquaredError(trainingsample, reconstruction, inputs);
+  }
+
+  fclose(file);
+
+  float avgloss = samples > 0 ? totalloss / samples : 0;
+  printf("Teacher reconstruction loss: %.4f (n=%d samples)\n", avgloss, samples);
+}
+
 void PerformanceMetricsTagged(NeuralNetwork * neuralnetwork,int PercentualEvaluation,float Threshold, int clientnodes, int interaction){
   
   int num_data = neuralnetwork->firstlayer->neurons + neuralnetwork->lastlayer->neurons;

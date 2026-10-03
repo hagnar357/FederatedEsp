@@ -16,13 +16,18 @@ The server runs in two phases once `CLIENTS_NUM` clients are registered:
 
 1. **TEACHER** — if a client registered with `GET /api/noderegister?role=teacher` (the simulated client in
    `../FederatedLearningTeacherClient`), the server sends it an untrained teacher (`GET /api/getteachertask`,
-   architecture from `TEACHER_*` in `lib/configs.h`). The client trains it and sends it back through the
-   WebSocket with `"type": "teacher"`. The trained teacher is saved as `modelos/<run>/teacher.json` and its
-   metrics go to `metrics.csv` with `interaction = -1`. After `TEACHER_TIMEOUT_S` without a teacher the
-   server moves on without one.
+   architecture/mode from `TEACHER_ARCHITECTURE` and `TEACHER_*` in `lib/configs.h`). The client trains it
+   and sends it back through the WebSocket with `"type": "teacher"`. The trained teacher is saved as
+   `modelos/<run>/teacher.json`. After `TEACHER_TIMEOUT_S` without a teacher the server moves on without one.
+   - `TEACHER_ARCH_CLASSIFIER`: a flat classifier, evaluated like the global model (its row goes to
+     `metrics.csv` with `interaction = -1`).
+   - `TEACHER_ARCH_ENCODER_DECODER` (default): a **pure autoencoder** (encoder → latent/bottleneck → decoder
+     → reconstruction, no classification layer, trained only to reconstruct its own input). It has no
+     classification metrics; its reconstruction error is printed to the server log instead of written to
+     `metrics.csv` (whose columns are classification-specific).
 2. **FEDERATED** — the usual rounds. The teacher is served at `GET /api/getteachermodel` together with the
-   distillation parameters (`KD_TEMPERATURE`, `KD_ALPHA`), and the teacher client takes part as a regular
-   client.
+   distillation parameters (`"mode"`, `KD_TEMPERATURE`, `KD_ALPHA`, and `latentlayerindex` for the
+   encoder-decoder teacher), and the teacher client takes part as a regular client.
 
 `GET /api/checkglobalmodel` now answers `{"status", "round", "phase", "task"}`; in phase TEACHER only the
 teacher client gets `status: 1` (`task: "teacher"`). Without a teacher client the server starts the

@@ -103,8 +103,12 @@ cJSON* TeacherModelToJSON() {
     cJSON_AddNumberToObject(root, "globalmodelstatus", 1);
     cJSON_AddNumberToObject(root, "trainingscounter", nodecontrol->teachertrainingscounter);
     cJSON* distillation = cJSON_AddObjectToObject(root, "distillation");
-    cJSON_AddNumberToObject(distillation, "temperature", KD_TEMPERATURE);
+    cJSON_AddStringToObject(distillation, "mode", nodecontrol->teacherlatentlayerindex >= 0 ? "latent" : "logit");
+    cJSON_AddNumberToObject(distillation, "temperature", KD_TEMPERATURE);   // kept, unused in "latent" mode
     cJSON_AddNumberToObject(distillation, "alpha", KD_ALPHA);
+    if (nodecontrol->teacherlatentlayerindex >= 0) {
+        cJSON_AddNumberToObject(distillation, "latentlayerindex", nodecontrol->teacherlatentlayerindex);
+    }
     cJSON_AddItemToObject(root, "neuralnetwork", NeuralNetworkToJSON(nodecontrol->teacherneuralnetwork));
     return root;
 }

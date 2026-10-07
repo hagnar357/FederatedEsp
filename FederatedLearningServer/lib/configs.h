@@ -1,5 +1,13 @@
 #define IP_ADDRESS "10.162.26.184"
 
+// Global/student model shape: MUST match the dataset's CSV columns (id,x1..xN,y0..yC-1) and
+// separate_dataset.py's NUM_FEATURES/NUM_CLASSES. Currently: HAR reduced to 32 features (PCA from
+// the original 561) over 6 activity classes (see FederatedLearningZephyr/data/dataset_full.csv).
+#define INPUT_FEATURES 32
+#define OUTPUT_CLASSES 6
+#define HIDDEN_NEURONS 16 // both hidden layers of the global/student model
+#define EVAL_SAMPLES 300  // rows read from data/datasetevaluation.csv per evaluation (it now has 1000)
+
 // Training settings
 #define CLIENTS_NUM 3
 #define EPOCHS 10
@@ -13,7 +21,7 @@
 
 // Teacher (phase 1): architecture and training of the teacher model trained by the teacher client
 #define TEACHER_HIDDEN_LAYERS 2
-#define TEACHER_HIDDEN_NEURONS 8      // 4-8-8-3 (input/output sizes follow the global model)
+#define TEACHER_HIDDEN_NEURONS 16     // input/output sizes follow the global model (TEACHER_ARCH_CLASSIFIER only)
 #define TEACHER_EPOCHS 500
 #define TEACHER_TIMEOUT_S 600         // give up waiting for the teacher and start FL without distillation
 
@@ -30,6 +38,6 @@
 // used when TEACHER_ARCHITECTURE == TEACHER_ARCH_ENCODER_DECODER
 #define TEACHER_ENCODER_LAYERS 2
 #define TEACHER_ENCODER_NEURONS 16
-#define TEACHER_LATENT_NEURONS 3   // MUST equal the global model's last-hidden-layer width (layerconfig2, see setFederatedLearningGlobalModel)
+#define TEACHER_LATENT_NEURONS HIDDEN_NEURONS // MUST equal the global model's last-hidden-layer width
 #define TEACHER_DECODER_LAYERS 2
 #define TEACHER_DECODER_NEURONS 16

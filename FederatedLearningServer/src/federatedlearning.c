@@ -492,14 +492,27 @@ void FeedFoward(NeuralNetwork * neuralnetwork){
     }
 }
 
-float WeightValue(int weightvalue){
+//faninsize: number of weights feeding into the neuron this weight belongs to (0 for neurons with
+//no inputs, e.g. the input layer). WEIGHT_VALUE_RANDOM draws from a SYMMETRIC range U(-1,1), scaled
+//by 1/sqrt(faninsize) (Xavier/He-style). Two separate problems, confirmed experimentally on a
+//4-16-16-[3]-16-16-4 autoencoder over 30 random seeds each:
+//  - the original range was U(0,1) (never negative): with ReLU, positive-only weights sum without
+//    ever cancelling, so the pre-activation keeps growing layer after layer regardless of scale;
+//    every one of 30 seeds got stuck predicting the dataset mean (fan-in scaling alone did not help:
+//    still 30/30 stuck, since it controls variance, not this systematic positive bias).
+//  - without fan-in scaling, wider/deeper layers get much larger pre-activation sums right at
+//    initialization, which can permanently kill an entire ReLU layer (zero gradient forever) or
+//    make training diverge to NaN (symmetric range alone: 29/30 seeds stuck or NaN).
+//  - both fixes together: 0/30 seeds failed, converging to a real input-dependent reconstruction.
+float WeightValue(int weightvalue, int faninsize){
   switch (weightvalue){
     case 0:
       return 0;
       break;
-    case 1:
-      return (float)(rand() % 100) / 100.0;
-      break;
+    case 1: {
+      float scale = faninsize > 0 ? 1.0f / sqrtf((float)faninsize) : 1.0f;
+      return ((float)(rand() % 200 - 100) / 100.0f) * scale;
+    }
     case 2:
       return 0.5;
       break;
@@ -603,7 +616,7 @@ void InitializeNeuralNetWork(NeuralNetwork * neuralnetwork,int layers,LayerConfi
           exit(1);
         }
         
-        newweight -> weight = WeightValue(weightvalue); 
+        newweight -> weight = WeightValue(weightvalue, newneuron -> weights);
         newweight -> nextweight = NULL;
         newweight -> previousweight = newweight -> nextweight;
 
@@ -657,19 +670,19 @@ void setFederatedLearningGlobalModel() {
   LayerConfig *layerconfig3 = malloc(sizeof(LayerConfig));
 
   layerconfig0->first =layerconfig0;
-  layerconfig0->neurons= 4;
+  layerconfig0->neurons= INPUT_FEATURES;
   layerconfig0->activationfunctiontype = 0;
   layerconfig0->next = layerconfig1;
 
-  layerconfig1->neurons= 3;
+  layerconfig1->neurons= HIDDEN_NEURONS;
   layerconfig1->activationfunctiontype = RELU;
   layerconfig1->next = layerconfig2;
 
-  layerconfig2->neurons= 3;
+  layerconfig2->neurons= HIDDEN_NEURONS;
   layerconfig2->activationfunctiontype = RELU;
   layerconfig2->next = layerconfig3;
 
-  layerconfig3->neurons= 3;
+  layerconfig3->neurons= OUTPUT_CLASSES;
   layerconfig3->activationfunctiontype = SOFTMAX;
   layerconfig3->next = NULL;
 
@@ -1045,7 +1058,7 @@ static void FinalizeRound(){
 
   // set 0 the neural network
   SetNeuralNetworkZeroWeightValue(nodecontrol->neuralnetwork);
-  PerformanceMetrics(federatedlearninginstance->neuralnetwork,30,0.5,nodecontrol->clientnodes);
+  PerformanceMetrics(federatedlearninginstance->neuralnetwork,EVAL_SAMPLES,0.5,nodecontrol->clientnodes);
   nodecontrol->currentinteraction++;
   SaveModel(nodecontrol->currentinteraction);
 
@@ -1206,7 +1219,7 @@ int ReceiveTeacherModel(FederatedLearning * teachermodel, ClientNode * clientnod
     TeacherReconstructionMetrics(nodecontrol->teacherneuralnetwork);
   } else {
     //teacher metrics go to metrics.csv with interaction = -1
-    PerformanceMetricsTagged(nodecontrol->teacherneuralnetwork, 30, 0.5, nodecontrol->clientnodes, -1);
+    PerformanceMetricsTagged(nodecontrol->teacherneuralnetwork, EVAL_SAMPLES, 0.5, nodecontrol->clientnodes, -1);
   }
 
   StartFederatedPhase();

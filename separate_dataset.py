@@ -3,6 +3,11 @@ import polars as pl
 import os
 import sys
 
+# must match the student/global model's input/output widths (see setFederatedLearningGlobalModel
+# in FederatedLearningServer/src/federatedlearning.c)
+NUM_FEATURES = 32
+NUM_CLASSES = 6
+
 def particionar_non_iid_dirichlet(
     labels,
     num_clientes,
@@ -64,9 +69,12 @@ if __name__ == "__main__":
     teacher_node_part = float(sys.argv[2]) if len(sys.argv) > 2 else None
 
     # ---------------------------------------------------------
-    data = pl.read_csv("FederatedLearningZephyr/data/dataset_full.csv", has_header=False, new_columns=["id", "x1", "x2", "x3", "x4", "y0", "y1", "y2"])
+    feature_cols = [f"x{i}" for i in range(1, NUM_FEATURES + 1)]
+    label_cols = [f"y{i}" for i in range(NUM_CLASSES)]
+    data = pl.read_csv("FederatedLearningZephyr/data/dataset_full.csv", has_header=False,
+                       new_columns=["id"] + feature_cols + label_cols)
     data = data.drop("id")
-    labels_inteiros = np.argmax(data[["y0", "y1", "y2"]], axis=1)
+    labels_inteiros = np.argmax(data[label_cols], axis=1)
     print(np.unique_counts(labels_inteiros))
     # ---------------------------------------------------------
     # 2. Alimentar as funções de particionamento
@@ -137,7 +145,7 @@ if __name__ == "__main__":
 
         print(f"✅ Salvo: {caminho_arquivo} | Linhas: {len(df_no)} | Colunas: {len(df_no.columns)}")
         print("Total de classes:\n")
-        for classe in ["y0", "y1", "y2"]:
+        for classe in label_cols:
             print(f"\t{classe}: ",sum(df_no[classe]))
 
     print("\nTodos os datasets particionados foram gerados com sucesso!")

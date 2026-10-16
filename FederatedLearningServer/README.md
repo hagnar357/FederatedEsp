@@ -26,8 +26,10 @@ The server runs in two phases once `CLIENTS_NUM` clients are registered:
      classification metrics; its reconstruction error is printed to the server log instead of written to
      `metrics.csv` (whose columns are classification-specific).
 2. **FEDERATED** — the usual rounds. The teacher is served at `GET /api/getteachermodel` together with the
-   distillation parameters (`"mode"`, `KD_TEMPERATURE`, `KD_ALPHA`, and `latentlayerindex` for the
-   encoder-decoder teacher), and the teacher client takes part as a regular client.
+   distillation parameters (`"mode"`, `KD_TEMPERATURE`, `KD_ALPHA`, and, for the encoder-decoder teacher,
+   `studentlayerindex` = `KD_STUDENT_HINT_LAYER`, the student hidden layer matched against the latent), and
+   the teacher client takes part as a regular client. The encoder-decoder teacher is served truncated to
+   encoder + latent; the full model is still saved in `teacher.json`.
 
 `GET /api/checkglobalmodel` now answers `{"status", "round", "phase", "task"}`; in phase TEACHER only the
 teacher client gets `status: 1` (`task: "teacher"`). Without a teacher client the server starts the

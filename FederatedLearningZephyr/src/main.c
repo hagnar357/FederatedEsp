@@ -57,6 +57,10 @@ void brink_error_led(int blink){
 
 #define GLOBAL_MODEL_MAX_ATTEMPTS 5
 #define SEND_MODEL_MAX_ATTEMPTS 3
+// after sending, the server stops offering this round to the node; if it still does for this many polls (~4 s each)
+// the model was lost in the network and is sent again, at most RESEND_MAX_PER_ROUND times per round
+#define RESEND_AFTER_POLLS 2
+#define RESEND_MAX_PER_ROUND 4
 
 void node_register(){
     // gpio_set_level(LED_PIN_SYNC, 1);
@@ -114,15 +118,32 @@ void deep_learning(){
 
     // rodada do último modelo global treinado e enviado; evita treinar 2x a mesma rodada
     int last_trained_round = -1;
+    int stale_polls = 0, resends = 0;
 
     while (1){
         wifi_wait_connected();
 
         int round = -1;
-        if(!global_model_status(&round) || round == last_trained_round){
+        if(!global_model_status(&round)){
             k_msleep(4000);
             continue;
         }
+
+        if (round == last_trained_round) {
+            // the server still offers the round whose model was already sent: it did not register it
+            // (a "sent" model can be lost in the network); send the same trained model again
+            stale_polls++;
+            if (stale_polls >= RESEND_AFTER_POLLS && resends < RESEND_MAX_PER_ROUND) {
+                resends++;
+                stale_polls = 0;
+                printf("Servidor ainda aguarda o modelo da rodada %d, reenviando (%d/%d)\n", round, resends, RESEND_MAX_PER_ROUND);
+                send_local_model(round);
+            }
+            k_msleep(4000);
+            continue;
+        }
+        stale_polls = 0;
+        resends = 0;
 
         FederatedLearning *globalmodelinstance = global_model();
         if (globalmodelinstance == NULL) {
@@ -131,9 +152,14 @@ void deep_learning(){
 
         replaceNeuralNetwork(globalmodelinstance);
 
-        // o teacher é atualizado a cada rodada; em falha o teacher em cache continua valendo
-        if (KnowledgeDistillationIsEnabled()) {
-            getteachermodel();
+        // o teacher é imutável após a fase 1: busca só uma vez e mantém em cache nas rodadas seguintes
+        if (KnowledgeDistillationIsEnabled() && KnowledgeDistillationGetTeacher() == NULL) {
+            if (getteachermodel() == TEACHER_FETCH_NETWORK_ERROR) {
+                // do not train this round without distillation because of a network error: try again
+                printf("Teacher nao baixado (erro de rede): rodada %d adiada\n", round);
+                k_msleep(4000);
+                continue;
+            }
         }
 
         NeuralNetworkTraining();
@@ -164,7 +190,7 @@ void deep_learning_test(){
         replaceNeuralNetwork(globalmodelinstance);
         FederatedLearning *FDI = getFederatedLearningInstance();
         PrintNeuralNetwork(FDI->neuralnetwork);
-        if (KnowledgeDistillationIsEnabled()) {
+        if (KnowledgeDistillationIsEnabled() && KnowledgeDistillationGetTeacher() == NULL) {
             getteachermodel();
         }
         NeuralNetworkTraining();

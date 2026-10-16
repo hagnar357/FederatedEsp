@@ -23,6 +23,8 @@ FederatedLearning* getglobalmodel(void);
 int getglobalmodelstatus(int *round);
 void postglobalmodel(void);
 int getregisternode(void);
+// getteachermodel(): 0 = teacher installed, -1 = unavailable/invalid (train without KD), TEACHER_FETCH_NETWORK_ERROR = try again
+#define TEACHER_FETCH_NETWORK_ERROR (-3)
 int getteachermodel(void);
 
 // Alterado para void (sem o pvParameters do FreeRTOS)

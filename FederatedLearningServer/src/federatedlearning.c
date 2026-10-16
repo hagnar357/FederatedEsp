@@ -528,7 +528,11 @@ void InitializeNeuralNetWork(NeuralNetwork * neuralnetwork,int layers,LayerConfi
   Layer *currrentlayer;
 
   //Inicialize a semente do gerador de números aleatórios
+#if WEIGHT_INIT_SEED
+  srand(WEIGHT_INIT_SEED);
+#else
   srand((unsigned) time(NULL));
+#endif
 
   neuralnetwork->layers = layers;
   neuralnetwork->lossfunctiontype = lossfunctiontype;
@@ -664,29 +668,26 @@ FederatedLearning *getFederatedLearningInstance() {
 void setFederatedLearningGlobalModel() {
 
   FederatedLearning *federatedLearningInstance = getFederatedLearningInstance();
-  LayerConfig *layerconfig0 = malloc(sizeof(LayerConfig));
-  LayerConfig *layerconfig1 = malloc(sizeof(LayerConfig));
-  LayerConfig *layerconfig2 = malloc(sizeof(LayerConfig));
-  LayerConfig *layerconfig3 = malloc(sizeof(LayerConfig));
+  //global/student model: input, HIDDEN_LAYERS hidden layers of HIDDEN_NEURONS (RELU) and the softmax output
+  int studentlayercount = HIDDEN_LAYERS + 2;
+  LayerConfig *studentconfig = calloc(studentlayercount, sizeof(LayerConfig));
+  for (int i = 0; i < studentlayercount; i++) {
+    studentconfig[i].first = studentconfig;
+    studentconfig[i].next = (i + 1 < studentlayercount) ? &studentconfig[i + 1] : NULL;
+    if (i == 0) {
+      studentconfig[i].neurons = INPUT_FEATURES;
+      studentconfig[i].activationfunctiontype = 0;
+    } else if (i == studentlayercount - 1) {
+      studentconfig[i].neurons = OUTPUT_CLASSES;
+      studentconfig[i].activationfunctiontype = SOFTMAX;
+    } else {
+      studentconfig[i].neurons = HIDDEN_NEURONS;
+      studentconfig[i].activationfunctiontype = RELU;
+    }
+  }
+  LayerConfig *layerconfig0 = &studentconfig[0];   //input layer, also the head of the list
 
-  layerconfig0->first =layerconfig0;
-  layerconfig0->neurons= INPUT_FEATURES;
-  layerconfig0->activationfunctiontype = 0;
-  layerconfig0->next = layerconfig1;
-
-  layerconfig1->neurons= HIDDEN_NEURONS;
-  layerconfig1->activationfunctiontype = RELU;
-  layerconfig1->next = layerconfig2;
-
-  layerconfig2->neurons= HIDDEN_NEURONS;
-  layerconfig2->activationfunctiontype = RELU;
-  layerconfig2->next = layerconfig3;
-
-  layerconfig3->neurons= OUTPUT_CLASSES;
-  layerconfig3->activationfunctiontype = SOFTMAX;
-  layerconfig3->next = NULL;
-
-  InitializeNeuralNetWork(federatedLearningInstance->neuralnetwork, 4 ,layerconfig0, CATEGORICAL_CROSS_ENTROPY,WEIGHT_VALUE_RANDOM);
+  InitializeNeuralNetWork(federatedLearningInstance->neuralnetwork, studentlayercount ,layerconfig0, CATEGORICAL_CROSS_ENTROPY,WEIGHT_VALUE_RANDOM);
   
   federatedLearningInstance->neuralnetwork->percentualtraining = TRAINING_SAMPLES;
   federatedLearningInstance->neuralnetwork->epoch = EPOCHS;
@@ -700,7 +701,7 @@ void setFederatedLearningGlobalModel() {
   federatedLearningInstance->nodecontrol->modelsreceived=0;
   federatedLearningInstance->nodecontrol->roundstarttime=time(NULL);
   //the aggregation accumulator must start at zero
-  InitializeNeuralNetWork(federatedLearningInstance->nodecontrol->neuralnetwork, 4 ,layerconfig0, CATEGORICAL_CROSS_ENTROPY,WEIGHT_VALUE_ZERO);
+  InitializeNeuralNetWork(federatedLearningInstance->nodecontrol->neuralnetwork, studentlayercount ,layerconfig0, CATEGORICAL_CROSS_ENTROPY,WEIGHT_VALUE_ZERO);
   federatedLearningInstance->nodecontrol->neuralnetwork->alpha=ALPHA;
   federatedLearningInstance->nodecontrol->neuralnetwork->epoch = EPOCHS;
   federatedLearningInstance->nodecontrol->neuralnetwork->regularization=L2;
@@ -716,10 +717,13 @@ void setFederatedLearningGlobalModel() {
 
   //pure autoencoder teacher (phase 1): Input -> encoder -> latent (KD point) -> decoder -> reconstruction.
   //Never sees the class labels; trained only to reconstruct its own input (MINIMAL_MEAN_SQUARE).
-  if (TEACHER_LATENT_NEURONS != layerconfig2->neurons) {
-    fprintf(stderr, "WARNING: TEACHER_LATENT_NEURONS (%d) differs from the global model's last hidden "
-            "layer width (%d); latent-layer knowledge distillation will be rejected by the nodes.\n",
-            TEACHER_LATENT_NEURONS, layerconfig2->neurons);
+  if (KD_STUDENT_HINT_LAYER < 1 || KD_STUDENT_HINT_LAYER > HIDDEN_LAYERS) {
+    fprintf(stderr, "WARNING: KD_STUDENT_HINT_LAYER (%d) is not a hidden layer of the global model; "
+            "latent-layer knowledge distillation will be rejected by the nodes.\n", KD_STUDENT_HINT_LAYER);
+  } else if (TEACHER_LATENT_NEURONS != studentconfig[KD_STUDENT_HINT_LAYER].neurons) {
+    fprintf(stderr, "WARNING: TEACHER_LATENT_NEURONS (%d) differs from the width of student layer %d (%d); "
+            "latent-layer knowledge distillation will be rejected by the nodes.\n",
+            TEACHER_LATENT_NEURONS, KD_STUDENT_HINT_LAYER, studentconfig[KD_STUDENT_HINT_LAYER].neurons);
   }
 
   int teacherlayers = 3 + TEACHER_ENCODER_LAYERS + TEACHER_DECODER_LAYERS;
@@ -762,7 +766,7 @@ void setFederatedLearningGlobalModel() {
       teacherconfig[i].neurons = layerconfig0->neurons;
       teacherconfig[i].activationfunctiontype = 0;
     } else if (i == teacherlayers - 1) {
-      teacherconfig[i].neurons = layerconfig3->neurons;
+      teacherconfig[i].neurons = studentconfig[studentlayercount - 1].neurons;
       teacherconfig[i].activationfunctiontype = SOFTMAX;
     } else {
       teacherconfig[i].neurons = TEACHER_HIDDEN_NEURONS;
@@ -776,15 +780,12 @@ void setFederatedLearningGlobalModel() {
 #endif
 
   teacher->epoch = TEACHER_EPOCHS;
-  teacher->alpha = ALPHA;
+  teacher->alpha = TEACHER_ALPHA;
   teacher->regularization = L2;
-  teacher->lambda = LAMBDA;
+  teacher->lambda = TEACHER_LAMBDA;
   teacher->percentualtraining = TRAINING_SAMPLES;
 
-  free(layerconfig0);
-  free(layerconfig1);
-  free(layerconfig2);
-  free(layerconfig3);
+  free(studentconfig);
 
   printf("Neural Network Compiled!\n");
 
@@ -924,6 +925,7 @@ int InitRunOutput(){
         printf("Run id %s already used, using %s\n", baseid, runid);
       }
       printf("Run output: %s | %s\n", runModelsDir, runResultsDir);
+      printf("Weight init seed: %d (0 = time-based)\n", WEIGHT_INIT_SEED);
       return 0;
     }
 

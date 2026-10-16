@@ -24,8 +24,10 @@
  *   to what BackPropagation already computes there from the (1 - alpha)-scaled output-layer delta:
  *     hintdelta_i = alpha * (2/n) * (h_s_i - h_t_i) * f'(Z_i)
  *   temperature is accepted but unused in this mode. The teacher needs the same number of inputs as the
- *   student, and its layer at latentlayerindex must have the same width as the student's last hidden layer
- *   (student->lastlayer->previouslayer). The teacher's own output layer/activation is irrelevant here.
+ *   student. The server only ever serves Encoder+Latent for this mode (Decoder/Reconstruction are never
+ *   read here), so the teacher's latent layer is always its lastlayer -- same convention KD_MODE_LOGIT
+ *   already uses for the output layer. The student's hint layer is the hidden layer at studentlayerindex
+ *   (0-based, sent by the server; -1 = last hidden layer) and must have the same width as that latent layer.
  *
  * All functions must be called from the same thread that runs the training.
  */
@@ -38,11 +40,11 @@ typedef struct KnowledgeDistillationConfig {
   int mode;             // KD_MODE_LOGIT or KD_MODE_LATENT (from the teacher once one is set)
   float temperature;    // KD_MODE_LOGIT only
   float alpha;
-  int latentlayerindex; // KD_MODE_LATENT only; 0-based, 0 = teacher's input layer
+  int studentlayerindex; // KD_MODE_LATENT only; 0-based student hint layer, -1 = last hidden layer
 } KnowledgeDistillationConfig;
 
 // runtime activation; the defaults come from CONFIG_FL_KNOWLEDGE_DISTILLATION, CONFIG_FL_KD_TEMPERATURE_X10
-// and CONFIG_FL_KD_ALPHA_PERCENT. mode/latentlayerindex are only ever known once a teacher is received.
+// and CONFIG_FL_KD_ALPHA_PERCENT. mode is only ever known once a teacher is received.
 int KnowledgeDistillationEnable(float temperature, float alpha);
 void KnowledgeDistillationDisable(void);
 bool KnowledgeDistillationIsEnabled(void);
@@ -52,14 +54,17 @@ KnowledgeDistillationConfig KnowledgeDistillationGetConfig(void);
 
 // takes ownership of teacher (also on error). mode: KD_MODE_LOGIT or KD_MODE_LATENT.
 // temperature/alpha <= 0 or out of range keep the local defaults (KD_MODE_LOGIT only; ignored for LATENT).
-// latentlayerindex is required (and validated) when mode == KD_MODE_LATENT.
+// studentlayerindex: KD_MODE_LATENT hint layer (-1 = last hidden layer); checked against the student later.
 int KnowledgeDistillationSetTeacher(FederatedLearning *teacher, int mode, float temperature, float alpha,
-                                    int latentlayerindex);
+                                    int studentlayerindex);
 NeuralNetwork *KnowledgeDistillationGetTeacher(void);
 void KnowledgeDistillationClearTeacher(void);
 
 // checks the current teacher against student per the active mode (see the comment above)
 bool KnowledgeDistillationTeacherCompatible(const NeuralNetwork *student);
+
+// KD_MODE_LATENT: 0-based index of the student's hint layer, or -1 if it is not a hidden layer of student
+int KnowledgeDistillationStudentHintIndex(const NeuralNetwork *student);
 
 // KD_MODE_LOGIT math (output logits, temperature-scaled softmax + KL)
 float KnowledgeDistillationLoss(const float *label, const float *studentlogits, const float *teacherlogits,

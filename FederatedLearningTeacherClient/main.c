@@ -98,7 +98,8 @@ static void train_local_round(int round, int *last_trained_round) {
     }
     replaceNeuralNetwork(global);
 
-    if (KnowledgeDistillationIsEnabled()) {
+    // o teacher é imutável após a fase 1: busca só uma vez e mantém em cache nas rodadas seguintes
+    if (KnowledgeDistillationIsEnabled() && KnowledgeDistillationGetTeacher() == NULL) {
         getteachermodel();
     }
 

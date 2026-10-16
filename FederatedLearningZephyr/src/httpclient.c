@@ -18,6 +18,8 @@ LOG_MODULE_REGISTER(HTTP_CLIENT, LOG_LEVEL_INF);
 static char *response_buffer = NULL;
 static size_t response_buffer_length = 0;
 static uint16_t response_status_code = 0;
+// HTTP status of the last failed attempt of perform_http_request_retries (0 = no HTTP answer: network error)
+static int last_failure_http = 0;
 
 static void clear_response_buffer(void)
 {
@@ -86,6 +88,8 @@ static int perform_http_request_retries(enum http_method method, const char *pat
     struct http_request req;
     int ret;
 
+    last_failure_http = 0;
+
     // Buffer temporário que o Zephyr usa para ler os pacotes TCP da rede
     uint8_t internal_rx_buf[1024];
 
@@ -145,6 +149,7 @@ static int perform_http_request_retries(enum http_method method, const char *pat
         }
 
         LOG_ERR("Erro na requisição %s: ret %d, HTTP %d (tentativa %d)", path, ret, response_status_code, retries + 1);
+        last_failure_http = ret >= 0 ? response_status_code : 0;
 
         if (ret >= 0 && response_status_code >= 400 && response_status_code < 500) {
             break;
@@ -237,10 +242,14 @@ FederatedLearning *getglobalmodel() {
 // Baixa o teacher da destilação (mesmo formato do modelo global + objeto opcional "distillation")
 // Em falha mantém o teacher já em cache (se houver)
 int getteachermodel() {
-    if (perform_http_request_retries(HTTP_GET, GET_TEACHER_MODEL, NULL, 1) != 0) {
-        LOG_WRN("Teacher indisponível: %s", KnowledgeDistillationGetTeacher() != NULL ?
-                "mantendo o teacher em cache" : "treino sem destilação");
-        return -1;
+    // 3 attempts: a single lost SYN (ETIMEDOUT) must not make the node train a round without distillation
+    if (perform_http_request_retries(HTTP_GET, GET_TEACHER_MODEL, NULL, 3) != 0) {
+        // 4xx = the server answered that there is no teacher (it runs without distillation);
+        // anything else is a network error and the caller should try again instead of training without KD
+        int network_error = !(last_failure_http >= 400 && last_failure_http < 500);
+        LOG_WRN("Teacher indisponível (%s): %s", network_error ? "erro de rede" : "sem teacher no servidor",
+                KnowledgeDistillationGetTeacher() != NULL ? "mantendo o teacher em cache" : "treino sem destilação");
+        return network_error ? TEACHER_FETCH_NETWORK_ERROR : -1;
     }
 
     int ret = -1;
@@ -254,20 +263,20 @@ int getteachermodel() {
 
     // parâmetros de destilação enviados pelo servidor (opcionais)
     int mode = KD_MODE_LOGIT;
-    int latentlayerindex = -1;
     float temperature = 0;
     float alpha = -1;
+    int studentlayerindex = -1;
     cJSON *distillation = cJSON_GetObjectItem(req, "distillation");
     if (cJSON_IsObject(distillation)) {
         cJSON *mode_item = cJSON_GetObjectItem(distillation, "mode");
-        cJSON *latentlayerindex_item = cJSON_GetObjectItem(distillation, "latentlayerindex");
         cJSON *temperature_item = cJSON_GetObjectItem(distillation, "temperature");
         cJSON *alpha_item = cJSON_GetObjectItem(distillation, "alpha");
+        cJSON *studentlayerindex_item = cJSON_GetObjectItem(distillation, "studentlayerindex");
         if (cJSON_IsString(mode_item) && strcmp(mode_item->valuestring, "latent") == 0) {
             mode = KD_MODE_LATENT;
         }
-        if (cJSON_IsNumber(latentlayerindex_item)) {
-            latentlayerindex = latentlayerindex_item->valueint;
+        if (cJSON_IsNumber(studentlayerindex_item)) {
+            studentlayerindex = studentlayerindex_item->valueint;
         }
         if (cJSON_IsNumber(temperature_item)) {
             temperature = (float)temperature_item->valuedouble;
@@ -281,7 +290,7 @@ int getteachermodel() {
     cJSON_Delete(req);
 
     if (teacher != NULL) {
-        ret = KnowledgeDistillationSetTeacher(teacher, mode, temperature, alpha, latentlayerindex);
+        ret = KnowledgeDistillationSetTeacher(teacher, mode, temperature, alpha, studentlayerindex);
     } else {
         LOG_ERR("Teacher inválido");
     }

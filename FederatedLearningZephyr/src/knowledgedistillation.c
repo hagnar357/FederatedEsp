@@ -10,14 +10,14 @@ LOG_MODULE_REGISTER(KnowledgeDistillation, LOG_LEVEL_INF);
 
 #define KD_MIN_PROBABILITY 1e-7f
 
-// local configuration (Kconfig defaults, changed by the runtime API); mode/latentlayerindex are only
-// ever known once a teacher is received, so they are not part of the Kconfig-backed defaults
+// local configuration (Kconfig defaults, changed by the runtime API); mode is only ever known once a
+// teacher is received, so it is not part of the Kconfig-backed defaults
 static KnowledgeDistillationConfig localconfig = {
   .enabled = IS_ENABLED(CONFIG_FL_KNOWLEDGE_DISTILLATION),
   .mode = KD_MODE_LOGIT,
   .temperature = CONFIG_FL_KD_TEMPERATURE_X10 / 10.0f,
   .alpha = CONFIG_FL_KD_ALPHA_PERCENT / 100.0f,
-  .latentlayerindex = -1,
+  .studentlayerindex = -1,
 };
 
 static NeuralNetwork *teacher = NULL;
@@ -25,7 +25,7 @@ static NeuralNetwork *teacher = NULL;
 static int teachermode = KD_MODE_LOGIT;
 static float teachertemperature = 0;     // <= 0: use the local configuration (KD_MODE_LOGIT only)
 static float teacheralpha = -1;          // <  0: use the local configuration
-static int teacherlatentlayerindex = -1; // KD_MODE_LATENT only
+static int teacherstudentlayerindex = -1; // KD_MODE_LATENT only; -1: student's last hidden layer
 
 static bool ValidTemperature(float temperature){
   return temperature > 0 && isfinite(temperature);
@@ -33,18 +33,6 @@ static bool ValidTemperature(float temperature){
 
 static bool ValidAlpha(float alpha){
   return alpha >= 0 && alpha <= 1;
-}
-
-// walks from the first layer, index 0 = the input layer; NULL if out of range
-static Layer *GetLayerAtIndex(const NeuralNetwork *network, int index){
-  if (network == NULL || index < 0) {
-    return NULL;
-  }
-  Layer *layer = network->firstlayer;
-  for (int i = 0; i < index && layer != NULL; i++) {
-    layer = layer->nextlayer;
-  }
-  return layer;
 }
 
 //////////////////////////////////////////////////CONFIGURATION//////////////////////////////////////////////////
@@ -79,7 +67,7 @@ KnowledgeDistillationConfig KnowledgeDistillationGetConfig(void){
   if (ValidAlpha(teacheralpha)) {
     config.alpha = teacheralpha;
   }
-  config.latentlayerindex = teacherlatentlayerindex;
+  config.studentlayerindex = teacherstudentlayerindex;
   return config;
 }
 
@@ -91,11 +79,11 @@ void KnowledgeDistillationClearTeacher(void){
   teachermode = KD_MODE_LOGIT;
   teachertemperature = 0;
   teacheralpha = -1;
-  teacherlatentlayerindex = -1;
+  teacherstudentlayerindex = -1;
 }
 
 int KnowledgeDistillationSetTeacher(FederatedLearning *newteacher, int mode, float temperature, float alpha,
-                                    int latentlayerindex){
+                                    int studentlayerindex){
   if (newteacher == NULL) {
     return -1;
   }
@@ -117,9 +105,10 @@ int KnowledgeDistillationSetTeacher(FederatedLearning *newteacher, int mode, flo
       return -1;
     }
   } else if (mode == KD_MODE_LATENT) {
-    // the latent layer must be an actual hidden layer: not the input (0) nor the output (layers-1)
-    if (latentlayerindex < 1 || latentlayerindex >= network->layers - 1) {
-      LOG_ERR("Teacher rejected: invalid latentlayerindex %d for a %d-layer network", latentlayerindex, network->layers);
+    // the server only ever serves Encoder+Latent for this mode, so the latent layer is always
+    // lastlayer; it just needs to be an actual hidden layer (not the input itself)
+    if (network->layers < 2) {
+      LOG_ERR("Teacher rejected: KD_MODE_LATENT needs at least 2 layers, got %d", network->layers);
       freeNeuralNetwork(network);
       return -1;
     }
@@ -134,12 +123,12 @@ int KnowledgeDistillationSetTeacher(FederatedLearning *newteacher, int mode, flo
   teachermode = mode;
   teachertemperature = ValidTemperature(temperature) ? temperature : 0;
   teacheralpha = ValidAlpha(alpha) ? alpha : -1;
-  teacherlatentlayerindex = (mode == KD_MODE_LATENT) ? latentlayerindex : -1;
+  teacherstudentlayerindex = (mode == KD_MODE_LATENT && studentlayerindex >= 0) ? studentlayerindex : -1;
 
   KnowledgeDistillationConfig config = KnowledgeDistillationGetConfig();
   if (mode == KD_MODE_LATENT) {
-    LOG_INF("Teacher updated: %d layers, mode=latent, latentlayerindex=%d, alpha=%.2f",
-            teacher->layers, teacherlatentlayerindex, (double)config.alpha);
+    LOG_INF("Teacher updated: %d layers, mode=latent, alpha=%.2f, studentlayerindex=%d",
+            teacher->layers, (double)config.alpha, teacherstudentlayerindex);
   } else {
     LOG_INF("Teacher updated: %d layers, mode=logit, T=%.2f, alpha=%.2f",
             teacher->layers, (double)config.temperature, (double)config.alpha);
@@ -157,14 +146,29 @@ bool KnowledgeDistillationTeacherCompatible(const NeuralNetwork *student){
   }
 
   if (teachermode == KD_MODE_LATENT) {
-    Layer *latentlayer = GetLayerAtIndex(teacher, teacherlatentlayerindex);
-    Layer *hintlayer = student->lastlayer->previouslayer;
-    return latentlayer != NULL && hintlayer != NULL && latentlayer->neurons == hintlayer->neurons;
+    int index = KnowledgeDistillationStudentHintIndex(student);
+    if (index < 0) {
+      return false;
+    }
+    Layer *hintlayer = student->firstlayer;
+    for (int i = 0; i < index; i++) {
+      hintlayer = hintlayer->nextlayer;
+    }
+    return teacher->lastlayer->neurons == hintlayer->neurons;
   }
 
   // KD_MODE_LOGIT
   return teacher->lastlayer->neurons == student->lastlayer->neurons &&
          student->lastlayer->activationfunctiontype == SOFTMAX;
+}
+
+int KnowledgeDistillationStudentHintIndex(const NeuralNetwork *student){
+  if (student == NULL) {
+    return -1;
+  }
+  int index = teacherstudentlayerindex >= 0 ? teacherstudentlayerindex : student->layers - 2;
+  // must be a hidden layer: not the input (0) nor the output (layers - 1)
+  return (index >= 1 && index <= student->layers - 2) ? index : -1;
 }
 
 //////////////////////////////////////////////////LOSS: KD_MODE_LOGIT//////////////////////////////////////////////////

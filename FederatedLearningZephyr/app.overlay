@@ -66,10 +66,16 @@
 			reg = <0x00010000 0x00100000>; /* 1 MB para o código */
 		};
 
-		/* Partição para o dataset.csv usando LittleFS */
+		/* Partição para o dataset.csv usando LittleFS.
+		 * 2.75 MB (era 2 MB): com o covertype de 17.220 linhas (326 B/linha) a maior partição de um nó chega a
+		 * ~6150 linhas ~= 2.0 MB, que não cabe em 2 MB. Com o dataset HAR (32 features), uma partição Dirichlet não-IID de um nó pode
+		 * passar de 1 MB sozinha (ex.: 3988 linhas ~= 1.25 MB) -- a antiga partição de 1 MB
+		 * estourava o littlefs ("File system is full") em splits desbalanceados.
+		 * Chip tem 4 MB no total (ver reg do &flash0); mcuboot(64K)+slot0(1M)+storage(2.75M) = ~3.8 MB,
+		 * deixando margem livre no flash. */
 		storage_partition: partition@110000 {
 			label = "storage";
-			reg = <0x00110000 0x00100000>; /* 1 MB de espaço para o CSV */
+			reg = <0x00110000 0x002C0000>;
 		};
 	};
 };

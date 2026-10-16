@@ -77,7 +77,7 @@ void NeuralNetworkTraining();
 void FeedFoward(NeuralNetwork * neuralnetwork);
 float ActivationFunctionCalculaton(float Z, int activationfunctiontype);
 float ActivationFunctionDerivativeCalculation(float a, int activationfunctiontype);
-void BackPropagation(NeuralNetwork *neuralnetwork, const float *outputdelta, float alpha, int regularization, float lambda, const float *hintdelta);
+void BackPropagation(NeuralNetwork *neuralnetwork, const float *outputdelta, float alpha, int regularization, float lambda, const float *hintdelta, int hintlayerindex);
 void CrossEntropyOutputDelta(NeuralNetwork *neuralnetwork, const float *label, float *delta);
 void ReconstructionOutputDelta(NeuralNetwork *neuralnetwork, const float *label, float *delta);
 float RidgeRegressionCalculation(NeuralNetwork *neuralnetwork,float lambda);

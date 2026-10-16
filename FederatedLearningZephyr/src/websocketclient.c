@@ -9,6 +9,7 @@
 #include <cJSON.h>
 #include "JSONConverter.h"
 #include "federatedlearning.h"
+#include "httpclient.h"
 
 /* No Zephyr, registramos o módulo de log assim, sem precisar passar a TAG nos prints */
 LOG_MODULE_REGISTER(WebSocketClient, LOG_LEVEL_INF);
@@ -73,20 +74,26 @@ int websocket_send_local_model(int round)
 
     LOG_INF("WEBSOCKET_EVENT_CONNECTED");
 
-    // 5. Gerar o JSON da rede neural
-    cJSON *root = federatedLearningToJSON(getFederatedLearningInstance());
-    if (root == NULL) {
-        LOG_ERR("Falha ao criar JSON do modelo.");
+    // 5. Gerar o texto do modelo. Servidor com formato plano: escrito direto num buffer (~5 KB para 260 pesos);
+    // senão a árvore cJSON (~76 B por peso). A falha costuma ser falta de memória: registrar, antes ela era silenciosa.
+    char *json_string = NULL;
+    if (server_supports_flat()) {
+        json_string = federatedLearningToFlatString(getFederatedLearningInstance(), round, NULL);
+    } else {
+        cJSON *root = federatedLearningToJSON(getFederatedLearningInstance());
+        if (root != NULL) {
+            // Rodada do modelo global usado no treino: o servidor rejeita modelos duplicados ou atrasados
+            cJSON_AddNumberToObject(root, "round", round);
+            json_string = cJSON_PrintUnformatted(root);
+            cJSON_Delete(root);   // Corrige o vazamento da árvore JSON
+        }
+    }
+    if (json_string == NULL) {
+        LOG_ERR("Falha ao serializar o modelo (sem memória?)");
         websocket_disconnect(ws_sock); // envia CLOSE e libera o contexto WebSocket
         zsock_close(sock);             // o socket TCP precisa ser fechado separadamente
         return -1;
     }
-
-    // Rodada do modelo global usado no treino: o servidor rejeita modelos duplicados ou atrasados
-    cJSON_AddNumberToObject(root, "round", round);
-
-    char *json_string = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);   // Corrige o vazamento da árvore JSON
 
     // 6. Enviar os dados via WebSocket, em fragmentos: websocket_send_msg faz k_malloc de uma cópia
     // de cada fragmento para aplicar a máscara, e o heap do kernel (compartilhado com o Wi-Fi) não

@@ -20,6 +20,13 @@ ZEPHYR_DIR="FederatedLearningZephyr"
 SERVER_DIR="FederatedLearningServer"
 TEACHER_CLIENT_DIR="FederatedLearningTeacherClient"
 
+# Placa: padrão = Heltec Wireless Stick Lite V3 (ESP32-S3). Para um ESP32 clássico (ex.: devkit com ESP32-D0WD):
+#   BOARD=esp32_devkitc/esp32/procpu CHIP=esp32 OVERLAY=esp32.overlay ./run_zephyr.sh ...
+BOARD="${BOARD:-heltec_wireless_stick_lite_v3/esp32s3/procpu}"
+CHIP="${CHIP:-esp32s3}"
+[ "$CHIP" = "esp32" ] && export MONITOR_NO_RESET=1   # the serial monitor must not reset the classic ESP32
+OVERLAY="${OVERLAY:-}"   # arquivo de overlay (relativo a FederatedLearningZephyr/); vazio = app.overlay
+
 # KD=0 desliga a destilação nas placas (o teacher continua sendo treinado pelo cliente simulado)
 KD="${KD:-1}"
 
@@ -127,7 +134,7 @@ for tty in "${TTYS[@]}"; do
       storage.bin
 
     esptool.py \
-      --chip esp32s3 \
+      --chip "$CHIP" \
       --port "$tty" \
       --baud 460800 \
       write_flash \
@@ -219,10 +226,10 @@ cd ..
 if [ "$KD" = "1" ]; then KD_CONFIG="y"; else KD_CONFIG="n"; fi
 
 west build \
-    -b heltec_wireless_stick_lite_v3/esp32s3/procpu \
+    -b "$BOARD" \
     "$ROOT_DIR/$ZEPHYR_DIR" \
     --pristine \
-    -- -DCONFIG_FL_KNOWLEDGE_DISTILLATION=$KD_CONFIG
+    -- -DCONFIG_FL_KNOWLEDGE_DISTILLATION=$KD_CONFIG ${OVERLAY:+-DDTC_OVERLAY_FILE=$OVERLAY}
 
 # ==========================
 # Flash dos nós
@@ -249,12 +256,16 @@ for tty in "${TTYS[@]}"; do
 
     python3 -u - "$tty" \
         > "$ROOT_DIR/$CLIENT_LOG_DIR/no_${NODE_ID}.log" 2>&1 <<'PYEOF' &
-import serial, sys
-with serial.Serial(sys.argv[1], 115200, timeout=1) as s:
-    while True:
-        line = s.readline()
-        if line:
-            print(line.decode('utf-8', errors='replace'), end='', flush=True)
+import serial, sys, os
+s = serial.Serial()
+s.port, s.baudrate, s.timeout = sys.argv[1], 115200, 1
+if os.environ.get("MONITOR_NO_RESET") == "1":
+    s.dtr = s.rts = False      # classic ESP32 boards: DTR/RTS wired to EN/IO0, opening the port would reset the chip
+s.open()
+while True:
+    line = s.readline()
+    if line:
+        print(line.decode('utf-8', errors='replace'), end='', flush=True)
 PYEOF
 
     MONITOR_PIDS+=($!)

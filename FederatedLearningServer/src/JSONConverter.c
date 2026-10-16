@@ -61,6 +61,85 @@ cJSON* NeuralNetworkToJSON(const NeuralNetwork* neuralnetwork) {
     return jsonNeuralNetwork;
 }
 
+//FLAT FORM OF THE NETWORK
+//the same network as NeuralNetworkToJSON, but the weights and biases travel as two comma separated strings
+//("w,w,w,..."): cJSON creates one node per number of an array (~76 B/weight on a board), a string is one node,
+//and a node reads it straight into its Weight list with strtof (JSONFlatToFederatedLearning). Numbers use %.9g,
+//the shortest form that gives back the exact float. Order: layer by layer (the input layer has no weights),
+//neuron by neuron; biases: one per neuron of every layer. Only fully connected networks can be sent this way.
+static int AppendFloatList(char *out, size_t cap, size_t *len, double value) {
+    int n = snprintf(out + *len, cap - *len, *len == 0 ? "%.9g" : ",%.9g", value);
+    if (n < 0 || (size_t)n >= cap - *len) return 0;
+    *len += (size_t)n;
+    return 1;
+}
+
+cJSON* NeuralNetworkToFlatJSON(const NeuralNetwork* neuralnetwork) {
+    size_t weightscount = 0, biasescount = 0;
+    int layers = 0;
+    for (const Layer* l = neuralnetwork->firstlayer; l != NULL; l = l->nextlayer) {
+        layers++;
+        for (const Neuron* n = l->firstneuron; n != NULL; n = n->nextneuron) {
+            biasescount++;
+            const Weight* w = n->firstweight;
+            for (int k = 0; k < n->weights; k++, w = w->nextweight) {
+                if (w == NULL) return NULL;
+                weightscount++;
+            }
+            //fully connected: as many weights as neurons in the previous layer
+            if (n->weights != (l->previouslayer != NULL ? l->previouslayer->neurons : 0)) return NULL;
+        }
+    }
+    if (layers != neuralnetwork->layers) return NULL;
+
+    // "-1.23456789e-05," is the longest number: 16 characters
+    size_t wcap = weightscount * 16 + 1, bcap = biasescount * 16 + 1;
+    char* weightsstr = (char*)malloc(wcap);
+    char* biasesstr = (char*)malloc(bcap);
+    cJSON* root = cJSON_CreateObject();
+    cJSON* neurons = cJSON_CreateArray();
+    cJSON* activations = cJSON_CreateArray();
+    if (!weightsstr || !biasesstr || !root || !neurons || !activations) {
+        free(weightsstr); free(biasesstr); cJSON_Delete(root); cJSON_Delete(neurons); cJSON_Delete(activations);
+        return NULL;
+    }
+    weightsstr[0] = biasesstr[0] = '\0';
+    size_t wlen = 0, blen = 0;
+    int ok = 1;
+
+    cJSON_AddNumberToObject(root, "epoch", neuralnetwork->epoch);
+    cJSON_AddNumberToObject(root, "alpha", neuralnetwork->alpha);
+    cJSON_AddNumberToObject(root, "regularization", neuralnetwork->regularization);
+    cJSON_AddNumberToObject(root, "lambda", neuralnetwork->lambda);
+    cJSON_AddNumberToObject(root, "percentualtraining", neuralnetwork->percentualtraining);
+    cJSON_AddNumberToObject(root, "lossfunctiontype", neuralnetwork->lossfunctiontype);
+    cJSON_AddNumberToObject(root, "layers", neuralnetwork->layers);
+
+    for (const Layer* l = neuralnetwork->firstlayer; l != NULL && ok; l = l->nextlayer) {
+        cJSON_AddItemToArray(neurons, cJSON_CreateNumber(l->neurons));
+        cJSON_AddItemToArray(activations, cJSON_CreateNumber(l->activationfunctiontype));
+        for (const Neuron* n = l->firstneuron; n != NULL && ok; n = n->nextneuron) {
+            ok = AppendFloatList(biasesstr, bcap, &blen, n->bias);
+            for (const Weight* w = n->firstweight; w != NULL && ok; w = w->nextweight) {
+                ok = AppendFloatList(weightsstr, wcap, &wlen, w->weight);
+            }
+        }
+    }
+    cJSON_AddItemToObject(root, "neurons", neurons);
+    cJSON_AddItemToObject(root, "activations", activations);
+    if (ok) {
+        cJSON_AddStringToObject(root, "weights", weightsstr);
+        cJSON_AddStringToObject(root, "biases", biasesstr);
+    }
+    free(weightsstr);
+    free(biasesstr);
+    if (!ok) {
+        cJSON_Delete(root);
+        return NULL;
+    }
+    return root;
+}
+
 //FFEDERATED LEARNING TO JSON
 cJSON* FederatedLearningToJSON(FederatedLearning* federatedLearning) {
     cJSON* root = cJSON_CreateObject();
@@ -75,6 +154,26 @@ cJSON* FederatedLearningToJSON(FederatedLearning* federatedLearning) {
 
     // Adicione outros campos da estrutura FederatedLearning conforme necessário
 
+    return root;
+}
+
+//the global model with the network in the flat form (GET /api/getglobalmodelflat); NULL if the network cannot be sent that way
+cJSON* FederatedLearningToFlatJSON(FederatedLearning* federatedLearning) {
+    cJSON* network = NeuralNetworkToFlatJSON(federatedLearning->neuralnetwork);
+    if (network == NULL) return NULL;
+    cJSON* root = cJSON_CreateObject();
+    if (!root) {
+        cJSON_Delete(network);
+        return NULL;
+    }
+
+    cJSON_AddStringToObject(root, "format", "flat");
+    cJSON_AddNumberToObject(root, "globalmodelstatus", federatedLearning->globalmodelstatus);
+    cJSON_AddNumberToObject(root, "trainingscounter", federatedLearning->trainingscounter);
+    if (federatedLearning->nodecontrol != NULL) {
+        cJSON_AddNumberToObject(root, "round", federatedLearning->nodecontrol->currentinteraction);
+    }
+    cJSON_AddItemToObject(root, "neuralnetwork", network);
     return root;
 }
 
@@ -98,7 +197,7 @@ cJSON* TeacherTaskToJSON() {
 //never read (see NeuralNetworkTraining in FederatedLearningZephyr/src/federatedlearning.c) -- this is
 //the payload actually served over the wire, roughly halving it for the encoder-decoder architecture.
 //NULL while no trained teacher exists.
-static cJSON* BuildTeacherModelJSON(bool full) {
+static cJSON* BuildTeacherModelJSON(bool full, bool flat) {
     NodeControl* nodecontrol = getFederatedLearningInstance()->nodecontrol;
     if (!nodecontrol->teachertrained) return NULL;
 
@@ -132,7 +231,14 @@ static cJSON* BuildTeacherModelJSON(bool full) {
         if (latentindex >= 0) {
             cJSON_AddNumberToObject(distillation, "studentlayerindex", KD_STUDENT_HINT_LAYER);
         }
-        cJSON_AddItemToObject(root, "neuralnetwork", NeuralNetworkToJSON(teacher));
+        cJSON* network = flat ? NeuralNetworkToFlatJSON(teacher) : NeuralNetworkToJSON(teacher);
+        if (network == NULL) {
+            cJSON_Delete(root);
+            root = NULL;
+        } else {
+            if (flat) cJSON_AddStringToObject(root, "format", "flat");
+            cJSON_AddItemToObject(root, "neuralnetwork", network);
+        }
     }
 
     if (cutlayer != NULL) {
@@ -144,14 +250,19 @@ static cJSON* BuildTeacherModelJSON(bool full) {
 }
 
 cJSON* TeacherModelToJSON() {
-    return BuildTeacherModelJSON(true);
+    return BuildTeacherModelJSON(true, false);
 }
 
 //contract of GET /api/getteachermodel: the latent layer is always the last layer of the received
 //network, so nodes no longer need a transmitted "latentlayerindex" to find it (same as KD_MODE_LOGIT
 //already does with its output layer)
 cJSON* TeacherModelForNodesToJSON() {
-    return BuildTeacherModelJSON(false);
+    return BuildTeacherModelJSON(false, false);
+}
+
+//same payload as TeacherModelForNodesToJSON with the network in the flat form (GET /api/getteachermodelflat)
+cJSON* TeacherModelForNodesFlatToJSON() {
+    return BuildTeacherModelJSON(false, true);
 }
 
 
@@ -331,6 +442,178 @@ FederatedLearning* JSONToFederatedLearning(const cJSON* json) {
         !cJSON_IsArray(layersArrayItem) ||
         !JSONToLayers(layersArrayItem, neuralnetwork)) {
         printf("Estrutura da rede neural inválida no JSON.\n");
+        freeFederatedLearningModel(federatedLearning);
+        return NULL;
+    }
+
+    return federatedLearning;
+}
+
+
+//FLAT FORM TO FEDERATED LEARNING
+//the same parser as the nodes' JSONFlatToFederatedLearning (FederatedLearningZephyr/src/JSONConverter.c), for the
+//models the nodes upload in the flat form: the weights and biases arrive as comma separated strings
+
+//reads the next float of the list and moves the cursor past the comma; 0 when there is none
+static int NextFloat(const char** cursor, float* value) {
+    char* end = NULL;
+    float v = strtof(*cursor, &end);
+    if (end == *cursor) {
+        return 0;
+    }
+    *value = v;
+    *cursor = (*end == ',') ? end + 1 : end;
+    return 1;
+}
+
+//the integers of a JSON array into out[count]; 0 when the array does not have exactly count numbers
+static int GetIntArray(const cJSON* object, const char* name, int* out, int count) {
+    cJSON* array = cJSON_GetObjectItem(object, name);
+    if (!cJSON_IsArray(array) || cJSON_GetArraySize(array) != count) {
+        return 0;
+    }
+    int i = 0;
+    cJSON* element;
+    cJSON_ArrayForEach(element, array) {
+        if (!cJSON_IsNumber(element)) {
+            return 0;
+        }
+        out[i++] = element->valueint;
+    }
+    return 1;
+}
+
+static int FlatToLayers(const cJSON* networkItem, NeuralNetwork* neuralnetwork) {
+    int layers = neuralnetwork->layers;
+    int* neurons = (int*)malloc(2 * layers * sizeof(int));
+    if (neurons == NULL) {
+        return 0;
+    }
+    int* activations = neurons + layers;
+
+    cJSON* weightsItem = cJSON_GetObjectItem(networkItem, "weights");
+    cJSON* biasesItem = cJSON_GetObjectItem(networkItem, "biases");
+    if (!GetIntArray(networkItem, "neurons", neurons, layers) ||
+        !GetIntArray(networkItem, "activations", activations, layers) ||
+        !cJSON_IsString(weightsItem) || !cJSON_IsString(biasesItem)) {
+        free(neurons);
+        return 0;
+    }
+
+    const char* weightscursor = weightsItem->valuestring;
+    const char* biasescursor = biasesItem->valuestring;
+    int ok = 1;
+
+    for (int i = 0; i < layers && ok; i++) {
+        Layer* layer = (Layer*)calloc(1, sizeof(Layer));
+        if (layer == NULL) {
+            ok = 0;
+            break;
+        }
+        //link first so freeFederatedLearningModel releases it on error
+        if (neuralnetwork->lastlayer == NULL) {
+            neuralnetwork->firstlayer = neuralnetwork->lastlayer = layer;
+        } else {
+            neuralnetwork->lastlayer->nextlayer = layer;
+            layer->previouslayer = neuralnetwork->lastlayer;
+            neuralnetwork->lastlayer = layer;
+        }
+        layer->neurons = neurons[i];
+        layer->activationfunctiontype = activations[i];
+        if (layer->neurons <= 0) {
+            ok = 0;
+            break;
+        }
+
+        //fully connected: as many weights as neurons in the previous layer (none in the input layer)
+        int weightsperneuron = (i == 0) ? 0 : neurons[i - 1];
+        const char* type = (i == 0) ? "INPUT" : (i == layers - 1) ? "OUTPUT" : "HIDDEN";
+
+        for (int j = 0; j < layer->neurons && ok; j++) {
+            Neuron* neuron = (Neuron*)calloc(1, sizeof(Neuron));
+            if (neuron == NULL) {
+                ok = 0;
+                break;
+            }
+            if (layer->lastneuron == NULL) {
+                layer->firstneuron = layer->lastneuron = neuron;
+            } else {
+                layer->lastneuron->nextneuron = neuron;
+                neuron->previousneuron = layer->lastneuron;
+                layer->lastneuron = neuron;
+            }
+            strncpy(neuron->neurontype, type, sizeof(neuron->neurontype) - 1);
+            neuron->weights = weightsperneuron;
+            if (!NextFloat(&biasescursor, &neuron->bias)) {
+                ok = 0;
+                break;
+            }
+            for (int k = 0; k < weightsperneuron; k++) {
+                Weight* weight = (Weight*)calloc(1, sizeof(Weight));
+                if (weight == NULL) {
+                    ok = 0;
+                    break;
+                }
+                if (neuron->lastweight == NULL) {
+                    neuron->firstweight = neuron->lastweight = weight;
+                } else {
+                    neuron->lastweight->nextweight = weight;
+                    weight->previousweight = neuron->lastweight;
+                    neuron->lastweight = weight;
+                }
+                if (!NextFloat(&weightscursor, &weight->weight)) {
+                    ok = 0;
+                    break;
+                }
+            }
+        }
+    }
+    free(neurons);
+
+    //both lists must be used up exactly: a shorter or longer list means the sender and this server disagree
+    while (*weightscursor == ' ') weightscursor++;
+    while (*biasescursor == ' ') biasescursor++;
+    return ok && *weightscursor == '\0' && *biasescursor == '\0';
+}
+
+FederatedLearning* JSONFlatToFederatedLearning(const cJSON* json) {
+    if (json == NULL || !cJSON_IsObject(json)) {
+        printf("Não foi possível converter.\n");
+        return NULL;
+    }
+
+    FederatedLearning* federatedLearning = (FederatedLearning*)calloc(1, sizeof(FederatedLearning));
+    if (federatedLearning == NULL) {
+        return NULL;
+    }
+
+    GetInt(json, "globalmodelstatus", &federatedLearning->globalmodelstatus);
+    GetInt(json, "trainingscounter", &federatedLearning->trainingscounter);
+
+    cJSON* networkItem = cJSON_GetObjectItem(json, "neuralnetwork");
+    if (!cJSON_IsObject(networkItem)) {
+        printf("JSON sem o campo neuralnetwork.\n");
+        freeFederatedLearningModel(federatedLearning);
+        return NULL;
+    }
+
+    NeuralNetwork* neuralnetwork = (NeuralNetwork*)calloc(1, sizeof(NeuralNetwork));
+    if (neuralnetwork == NULL) {
+        freeFederatedLearningModel(federatedLearning);
+        return NULL;
+    }
+    federatedLearning->neuralnetwork = neuralnetwork;
+
+    GetInt(networkItem, "epoch", &neuralnetwork->epoch);
+    GetFloat(networkItem, "alpha", &neuralnetwork->alpha);
+    GetInt(networkItem, "regularization", &neuralnetwork->regularization);
+    GetFloat(networkItem, "lambda", &neuralnetwork->lambda);
+    GetInt(networkItem, "percentualtraining", &neuralnetwork->percentualtraining);
+    GetInt(networkItem, "lossfunctiontype", &neuralnetwork->lossfunctiontype);
+
+    if (!GetInt(networkItem, "layers", &neuralnetwork->layers) || neuralnetwork->layers < 2 || neuralnetwork->layers > 64 ||
+        !FlatToLayers(networkItem, neuralnetwork)) {
+        printf("Estrutura da rede neural inválida no JSON plano.\n");
         freeFederatedLearningModel(federatedLearning);
         return NULL;
     }

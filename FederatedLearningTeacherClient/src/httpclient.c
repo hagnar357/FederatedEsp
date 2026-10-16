@@ -15,6 +15,7 @@
 #define TIMEOUT_S 5
 
 static char server_ip[INET_ADDRSTRLEN] = "127.0.0.1";
+int teacherclient_flat_teacher = 1;
 static int server_port = 8888;
 static char bind_ip[INET_ADDRSTRLEN] = "";
 
@@ -174,7 +175,10 @@ int getglobalmodelstatus(int *round, char *phase, size_t phase_len, char *task, 
     return status;
 }
 
-static FederatedLearning *get_model(const char *path, int max_retries) {
+// 1 once the server answered the flat global model endpoint: uploads then use the flat form too (like the boards)
+int teacherclient_server_flat = 0;
+
+static FederatedLearning *get_model_ex(const char *path, int max_retries, int flat) {
     char *body;
     if (perform_http_request_retries(path, &body, max_retries) != 0) {
         return NULL;
@@ -183,7 +187,7 @@ static FederatedLearning *get_model(const char *path, int max_retries) {
     FederatedLearning *model = NULL;
     cJSON *req = cJSON_Parse(body);
     if (req != NULL) {
-        model = JSONToFederatedLearning(req);
+        model = flat ? JSONFlatToFederatedLearning(req) : JSONToFederatedLearning(req);
         cJSON_Delete(req);
     } else {
         printf("<err> HTTP: invalid JSON from %s\n", path);
@@ -192,7 +196,20 @@ static FederatedLearning *get_model(const char *path, int max_retries) {
     return model;
 }
 
+static FederatedLearning *get_model(const char *path, int max_retries) {
+    return get_model_ex(path, max_retries, 0);
+}
+
 FederatedLearning *getglobalmodel(void) {
+    // the flat form first, like the boards; an older server answers 404 and the JSON endpoint is used
+    if (teacherclient_flat_teacher) {
+        FederatedLearning *model = get_model_ex(GET_GLOBAL_MODEL_FLAT, 1, 1);
+        if (model != NULL) {
+            teacherclient_server_flat = 1;
+            return model;
+        }
+        teacherclient_server_flat = 0;
+    }
     return get_model(GET_GLOBAL_MODEL, MAX_RETRIES);
 }
 
@@ -203,7 +220,14 @@ FederatedLearning *getteachertask(void) {
 // Same behaviour as the node: one attempt, the cached teacher is kept on failure
 int getteachermodel(void) {
     char *body;
-    if (perform_http_request_retries(GET_TEACHER_MODEL, &body, 1) != 0) {
+    int flat = teacherclient_flat_teacher;
+    // the flat form first, like the boards (so every run on the PC also exercises it); an older server answers 404
+    int failed = flat ? perform_http_request_retries(GET_TEACHER_MODEL_FLAT, &body, 1) != 0 : 1;
+    if (failed) {
+        flat = 0;
+        failed = perform_http_request_retries(GET_TEACHER_MODEL, &body, 1) != 0;
+    }
+    if (failed) {
         printf("<wrn> Teacher unavailable: %s\n", KnowledgeDistillationGetTeacher() != NULL ?
                "keeping the cached teacher" : "training without distillation");
         return -1;
@@ -235,7 +259,7 @@ int getteachermodel(void) {
         if (cJSON_IsNumber(alpha_item)) alpha = (float)alpha_item->valuedouble;
     }
 
-    FederatedLearning *teacher = JSONToFederatedLearning(req);
+    FederatedLearning *teacher = flat ? JSONFlatToFederatedLearning(req) : JSONToFederatedLearning(req);
     cJSON_Delete(req);
     if (teacher != NULL) {
         ret = KnowledgeDistillationSetTeacher(teacher, mode, temperature, alpha, studentlayerindex);

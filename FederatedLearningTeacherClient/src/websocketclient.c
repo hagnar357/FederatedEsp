@@ -6,6 +6,7 @@
 
 #include <cJSON.h>
 #include "websocketclient.h"
+#include "httpclient.h"
 #include "JSONConverter.h"
 #include "federatedlearning.h"
 
@@ -90,17 +91,21 @@ static const struct lws_protocols protocols[] = {
 };
 
 int websocket_send_model(const char *type, int round) {
-    cJSON *root = federatedLearningToJSON(getFederatedLearningInstance());
-    if (root == NULL) {
-        printf("<err> WebSocket: failed to serialize the model\n");
-        return -1;
+    char *json_string = NULL;
+    if (teacherclient_server_flat) {
+        // flat form: one buffer, no cJSON tree (the server told us it understands it by serving the flat global model)
+        json_string = federatedLearningToFlatString(getFederatedLearningInstance(), round, type);
+    } else {
+        cJSON *root = federatedLearningToJSON(getFederatedLearningInstance());
+        if (root != NULL) {
+            cJSON_AddStringToObject(root, "type", type);
+            cJSON_AddNumberToObject(root, "round", round);
+            json_string = cJSON_PrintUnformatted(root);
+            cJSON_Delete(root);
+        }
     }
-    cJSON_AddStringToObject(root, "type", type);
-    cJSON_AddNumberToObject(root, "round", round);
-
-    char *json_string = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
     if (json_string == NULL) {
+        printf("<err> WebSocket: failed to serialize the model\n");
         return -1;
     }
 

@@ -27,10 +27,11 @@
 
 static void usage(const char *program) {
     fprintf(stderr,
-            "Usage: %s --server IP --dataset path [--port 8888] [--wsport 8080] [--no-kd] [--role teacher|client] [--bind IP]\n"
+            "Usage: %s --server IP --dataset path [--port 8888] [--wsport 8080] [--no-kd] [--role teacher|client] [--bind IP] [--json-only]\n"
             "  --no-kd   train without knowledge distillation in the federated phase\n"
             "  --role    client: do not train the teacher (default: teacher)\n"
-            "  --bind    local IP to connect from (several simulated clients on one host)\n",
+            "  --bind    local IP to connect from (several simulated clients on one host)\n"
+            "  --json-only  use the full JSON (teacher, global model, upload) instead of the flat form\n",
             program);
 }
 
@@ -131,6 +132,7 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--role") == 0 && i + 1 < argc) role = argv[++i];
         else if (strcmp(argv[i], "--bind") == 0 && i + 1 < argc) bind_ip = argv[++i];
         else if (strcmp(argv[i], "--no-kd") == 0) use_kd = 0;
+        else if (strcmp(argv[i], "--json-only") == 0 || strcmp(argv[i], "--json-teacher") == 0) teacherclient_flat_teacher = 0;
         else { usage(argv[0]); return 1; }
     }
     if (server == NULL || dataset == NULL) {

@@ -39,11 +39,17 @@ void handle_request(int client_socket,struct sockaddr_in client_address) {
     else if (strstr(buffer, "GET /api/getglobalmodel HTTP/1.1") != NULL){
         handle_get_globalmodel(client_socket);
     }
+    else if (strstr(buffer, "GET /api/getglobalmodelflat HTTP/1.1") != NULL){
+        handle_get_globalmodelflat(client_socket);
+    }
     else if (strstr(buffer, "GET /api/getteachertask HTTP/1.1") != NULL){
         handle_get_teachertask(client_socket,client_ip);
     }
     else if (strstr(buffer, "GET /api/getteachermodel HTTP/1.1") != NULL){
         handle_get_teachermodel(client_socket);
+    }
+    else if (strstr(buffer, "GET /api/getteachermodelflat HTTP/1.1") != NULL){
+        handle_get_teachermodelflat(client_socket);
     }
     else if (strstr(buffer, "POST /api/postglobalmodel HTTP/1.1") != NULL){
         

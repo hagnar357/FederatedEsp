@@ -13,10 +13,12 @@
 
 // 2. Isolamos as Rotas (Paths) para o Cabeçalho HTTP
 #define GET_GLOBAL_MODEL        "/api/getglobalmodel"
+#define GET_GLOBAL_MODEL_FLAT   "/api/getglobalmodelflat"
 #define GET_GLOBAL_MODEL_STATUS "/api/checkglobalmodel"
 #define GET_REGISTER_NODE       "/api/noderegister"
 #define POST_GLOBAL_MODEL       "/api/postglobalmodel"
 #define GET_TEACHER_MODEL       "/api/getteachermodel"
+#define GET_TEACHER_MODEL_FLAT  "/api/getteachermodelflat"
 
 // 3. Assinaturas das funções (removendo os parâmetros do FreeRTOS)
 FederatedLearning* getglobalmodel(void);
@@ -26,6 +28,8 @@ int getregisternode(void);
 // getteachermodel(): 0 = teacher installed, -1 = unavailable/invalid (train without KD), TEACHER_FETCH_NETWORK_ERROR = try again
 #define TEACHER_FETCH_NETWORK_ERROR (-3)
 int getteachermodel(void);
+// 1 once the flat model endpoints worked: the node may then upload its model in the flat form
+int server_supports_flat(void);
 
 // Alterado para void (sem o pvParameters do FreeRTOS)
 void http_post_task(void);

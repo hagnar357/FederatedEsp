@@ -219,22 +219,49 @@ int getregisternode() {
     return registered;
 }
 
+// 1 once the server answered the flat model endpoints; the node then also uploads its model in the flat form
+// (an older server would reject that upload silently). 0 until proven / after a 4xx.
+static int server_flat = 0;
+// stays 0 for the rest of the run after the server answered 4xx to the flat endpoint (older server): no 404 every round
+static int flat_endpoints_unsupported = 0;
+
+int server_supports_flat(void) {
+    return server_flat;
+}
+
 FederatedLearning *getglobalmodel() {
-    if (perform_http_request(HTTP_GET, GET_GLOBAL_MODEL, NULL) != 0) {
+    int flat = 0;
+    if (!flat_endpoints_unsupported) {
+        // the flat form first: a cJSON node per weight does not fit next to the teacher in 80 KB of heap
+        if (perform_http_request(HTTP_GET, GET_GLOBAL_MODEL_FLAT, NULL) == 0) {
+            flat = 1;
+        } else if (last_failure_http >= 400 && last_failure_http < 500) {
+            // an older server has no flat route: JSON from now on (and no flat upload)
+            flat_endpoints_unsupported = 1;
+            server_flat = 0;
+        } else {
+            return NULL;   // network error: the caller tries again
+        }
+    }
+    if (!flat && perform_http_request(HTTP_GET, GET_GLOBAL_MODEL, NULL) != 0) {
         return NULL;
     }
 
     printf("Getting global model\n");
     FederatedLearning *FederatedLearningInstance = NULL;
     cJSON *req = cJSON_Parse(response_buffer);
+    // the text is no longer needed once parsed: free it before the network is built
+    clear_response_buffer();
 
     if (req != NULL) {
-        FederatedLearningInstance = JSONToFederatedLearning(req);
+        FederatedLearningInstance = flat ? JSONFlatToFederatedLearning(req) : JSONToFederatedLearning(req);
         cJSON_Delete(req);
+        if (flat && FederatedLearningInstance != NULL) {
+            server_flat = 1;
+        }
     } else {
         LOG_ERR("Falha no parse do modelo global");
     }
-    clear_response_buffer();
     return FederatedLearningInstance;
 }
 
@@ -242,8 +269,16 @@ FederatedLearning *getglobalmodel() {
 // Baixa o teacher da destilação (mesmo formato do modelo global + objeto opcional "distillation")
 // Em falha mantém o teacher já em cache (se houver)
 int getteachermodel() {
+    // the flat form first (the weights as strings: a board with 80 KB of heap cannot hold a cJSON node per weight);
     // 3 attempts: a single lost SYN (ETIMEDOUT) must not make the node train a round without distillation
-    if (perform_http_request_retries(HTTP_GET, GET_TEACHER_MODEL, NULL, 3) != 0) {
+    int flat = 1;
+    int failed = perform_http_request_retries(HTTP_GET, GET_TEACHER_MODEL_FLAT, NULL, 3) != 0;
+    if (failed && last_failure_http >= 400 && last_failure_http < 500) {
+        // an older server has no flat route (or there is no teacher yet): ask the JSON endpoint once; its answer is final
+        flat = 0;
+        failed = perform_http_request_retries(HTTP_GET, GET_TEACHER_MODEL, NULL, 1) != 0;
+    }
+    if (failed) {
         // 4xx = the server answered that there is no teacher (it runs without distillation);
         // anything else is a network error and the caller should try again instead of training without KD
         int network_error = !(last_failure_http >= 400 && last_failure_http < 500);
@@ -286,7 +321,7 @@ int getteachermodel() {
         }
     }
 
-    FederatedLearning *teacher = JSONToFederatedLearning(req);
+    FederatedLearning *teacher = flat ? JSONFlatToFederatedLearning(req) : JSONToFederatedLearning(req);
     cJSON_Delete(req);
 
     if (teacher != NULL) {

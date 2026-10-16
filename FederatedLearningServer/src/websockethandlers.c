@@ -25,7 +25,11 @@ void handle_clint_model_message(const char * message, int length,char *ip_addr){
     cJSON *type_item = cJSON_GetObjectItem(json_model, "type");
     int isteachermessage = cJSON_IsString(type_item) && strcmp(type_item->valuestring, "teacher") == 0;
 
-    FederatedLearning *clientmodel = JSONToFederatedLearning(json_model);
+    // "format": "flat" is the upload the boards with little RAM send (weights and biases as strings of numbers)
+    cJSON *format_item = cJSON_GetObjectItem(json_model, "format");
+    int isflat = cJSON_IsString(format_item) && strcmp(format_item->valuestring, "flat") == 0;
+
+    FederatedLearning *clientmodel = isflat ? JSONFlatToFederatedLearning(json_model) : JSONToFederatedLearning(json_model);
     cJSON_Delete(json_model);
 
     if (clientmodel == NULL) {

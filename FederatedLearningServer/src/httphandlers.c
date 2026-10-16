@@ -83,6 +83,28 @@ void handle_get_globalmodel(int client_socket) {
     free(response_str);
 }
 
+// Same as GET /api/getglobalmodel with the network as two strings of numbers and without any white space, for the
+// boards with little RAM (see handle_get_teachermodelflat)
+void handle_get_globalmodelflat(int client_socket) {
+    FederatedLearningLock();
+    cJSON *json_response = FederatedLearningToFlatJSON(getFederatedLearningInstance());
+    FederatedLearningUnlock();
+
+    if (json_response == NULL) {
+        handle_not_found_request(client_socket);
+        return;
+    }
+
+    char *response_str = cJSON_PrintUnformatted(json_response);
+    cJSON_Delete(json_response);
+    if (response_str == NULL) {
+        handle_not_found_request(client_socket);
+        return;
+    }
+    send_json_response(client_socket, response_str);
+    free(response_str);
+}
+
 static ClientNode *find_client_node(FederatedLearning *instance, const char *ip_addr);
 
 // Phase TEACHER: the untrained teacher task, only for the teacher client
@@ -125,6 +147,28 @@ void handle_get_teachermodel(int client_socket) {
     }
 
     char *response_str = cJSON_Print(json_response);
+    cJSON_Delete(json_response);
+    if (response_str == NULL) {
+        handle_not_found_request(client_socket);
+        return;
+    }
+    send_json_response(client_socket, response_str);
+    free(response_str);
+}
+
+// Same as GET /api/getteachermodel with the network as two strings of numbers and without any white space
+// (about a third of the size, and it is read without a cJSON node per weight): for boards with little RAM
+void handle_get_teachermodelflat(int client_socket) {
+    FederatedLearningLock();
+    cJSON *json_response = TeacherModelForNodesFlatToJSON();
+    FederatedLearningUnlock();
+
+    if (json_response == NULL) {
+        handle_not_found_request(client_socket);
+        return;
+    }
+
+    char *response_str = cJSON_PrintUnformatted(json_response);
     cJSON_Delete(json_response);
     if (response_str == NULL) {
         handle_not_found_request(client_socket);

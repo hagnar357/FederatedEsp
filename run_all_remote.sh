@@ -46,10 +46,14 @@ runs_for() {   # runs of one fraction, one "label:KD:arch:alpha:hint layer" per 
     for a in $alphas; do echo "c$f-logit$a:1:TEACHER_ARCH_CLASSIFIER:$a:1"; done
 }
 
+# stop at once, with the list of what is missing, if this computer cannot run the boards side (Zephyr workspace,
+# west, esptool, Python modules, serial access...): otherwise every run fails right at the start
+./check_server_env.sh --quiet || { echo "this computer is not ready for the runs (see above); full report: ./check_server_env.sh"; exit 1; }
+
 # which firmware: detect the chip of every board with esptool unless BOARD_TYPE says it
 detect_chip() {   # prints esp32s3 | esp32 | unknown for one serial port
     local out
-    out=$(source /home/flips/zephyrproject/.venv/bin/activate && esptool --port "$1" flash-id 2>&1 | grep -m1 "Chip type")
+    out=$(source "${ZEPHYR_WORKSPACE:-$(dirname "$PWD")}/.venv/bin/activate" && esptool --port "$1" flash-id 2>&1 | grep -m1 "Chip type")
     case "$out" in
         *ESP32-S3*) echo esp32s3 ;;
         *ESP32*)    echo esp32 ;;

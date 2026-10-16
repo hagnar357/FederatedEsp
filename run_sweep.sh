@@ -34,8 +34,14 @@ RUNS=$(cat)
 OUT="$ROOT/log_run/_sweep_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$OUT"
 
-source /home/flips/zephyrproject/.venv/bin/activate
-source /home/flips/zephyrproject/zephyr/zephyr-env.sh
+# the Zephyr workspace (west, esptool, Python modules): the folder that contains this repository unless told otherwise
+WS=${ZEPHYR_WORKSPACE:-$(dirname "$ROOT")}
+if [ ! -f "$WS/.venv/bin/activate" ] || [ ! -f "$WS/zephyr/zephyr-env.sh" ]; then
+    echo "Zephyr workspace not found in $WS (needs .venv and zephyr/): put the repository inside it or set ZEPHYR_WORKSPACE; see ./check_server_env.sh"
+    exit 1
+fi
+source "$WS/.venv/bin/activate"
+source "$WS/zephyr/zephyr-env.sh"
 cd "$ROOT"
 
 KEYS="HIDDEN_NEURONS HIDDEN_LAYERS WEIGHT_INIT_SEED KD_ALPHA KD_TEMPERATURE KD_STUDENT_HINT_LAYER TEACHER_ARCHITECTURE TEACHER_TIMEOUT_S TEACHER_EPOCHS TEACHER_ALPHA TEACHER_HIDDEN_LAYERS TEACHER_HIDDEN_NEURONS TEACHER_ENCODER_LAYERS TEACHER_DECODER_LAYERS TEACHER_LAMBDA CLIENTS_NUM"

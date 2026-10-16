@@ -111,7 +111,11 @@ void handle_message() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#define MAX_JSON_SIZE 16384 // String JSON max size
+// String JSON max size. Must fit the largest model ever sent over this socket (local models and the
+// trained teacher). A 4-16-16-[3]-16-16-4 encoder-decoder teacher alone serializes to ~24KB; this
+// leaves headroom for bigger architectures. The server runs on a PC, so the per-connection cost
+// (this buffer lives inside each WebSocket session's per_session_data) is negligible.
+#define MAX_JSON_SIZE 131072
 
 // Each connection has its own reassembly buffer, so fragments of different nodes never mix
 struct per_session_data {

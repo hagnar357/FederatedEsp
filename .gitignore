@@ -7,7 +7,10 @@ FederatedLearningServer/.vscode
 FederatedLearningServer/FederatedLearningServer
 FederatedLearningServer/modelos
 FederatedLearningServer/resultados
+FederatedLearningServer/resultados/*
 FederatedLearningTeacherClient/FederatedLearningTeacherClient
 log_run
+datasets_backup_iris/
 
 
+log_teacher_remoto

@@ -16,16 +16,16 @@
 extern struct k_sem wifi_connected_sem;
 
 // Credenciais de Rede
-#define WIFI_SSID       "felipe"
-#define WIFI_PASSWORD   "senha111"
+#define WIFI_SSID       "HUAWEI-CAECOMPS-2.4"
+#define WIFI_PASSWORD   "admlocal123-"
 
 // Configs http
-#define SERVER_IP "10.190.120.184"
+#define SERVER_IP "192.168.3.5"
 #define SERVER_PORT 8888
 
 
 // Configs para o Websocket
-#define WS_SERVER_IP "10.190.120.184"
+#define WS_SERVER_IP "192.168.3.5"
 #define WS_SERVER_PORT 8080
 #define WS_SERVER_PATH "/"
 

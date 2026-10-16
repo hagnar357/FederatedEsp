@@ -5,6 +5,8 @@
 #include <zephyr/net/wifi_mgmt.h>
 #include <zephyr/net/net_mgmt.h>
 #include <zephyr/net/dhcpv4.h>
+#include <zephyr/net/socket.h>
+#include "esp_wifi.h" // esp_wifi_set_ps: the Zephyr driver has no power-save control in net_mgmt
 
 #include <string.h>
 #include <stdint.h>
@@ -16,8 +18,11 @@ LOG_MODULE_REGISTER(SystemConfig, LOG_LEVEL_INF);
 K_SEM_DEFINE(wifi_connected_sem, 0, 1);
 
 #define WIFI_RECONNECT_DELAY K_SECONDS(5)
+#define WIFI_MIN_REQUEST_INTERVAL_MS 3000
+#define KEEPALIVE_PERIOD K_SECONDS(10)
 
 static atomic_t wifi_connected = ATOMIC_INIT(0);
+static atomic_t wifi_associated = ATOMIC_INIT(0); // associated with the AP (IP may still be missing)
 
 /* Estruturas para "ouvir" os eventos de rede (Substitui o esp_event_handler) */
 static struct net_mgmt_event_callback wifi_cb;
@@ -36,17 +41,51 @@ static void wifi_connect_request(void)
     wifi_params.security = WIFI_SECURITY_TYPE_PSK; // Assumindo WPA2
 
     LOG_INF("Conectando ao WiFi...");
-    if (net_mgmt(NET_REQUEST_WIFI_CONNECT, iface, &wifi_params, sizeof(struct wifi_connect_req_params))) {
-        LOG_ERR("Erro ao solicitar conexão Wi-Fi.");
+    int err = net_mgmt(NET_REQUEST_WIFI_CONNECT, iface, &wifi_params, sizeof(struct wifi_connect_req_params));
+    if (err) {
+        LOG_ERR("Erro ao solicitar conexão Wi-Fi: %d", err);
+    }
+}
+
+/* After a re-association the DHCP client may keep the previous lease and never raise NET_EVENT_IPV4_ADDR_ADD again,
+ * so also treat "associated and holding a valid IPv4 address" as connected */
+static void wifi_check_ip_ready(void)
+{
+    struct net_if *iface = net_if_get_default();
+
+    if (atomic_get(&wifi_associated) && !atomic_get(&wifi_connected) &&
+        net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED) != NULL) {
+        LOG_INF("Reassociado com IP valido, retomando");
+        atomic_set(&wifi_connected, 1);
+        k_sem_give(&wifi_connected_sem);
     }
 }
 
 /* A reconexão roda na workqueue do sistema, fora do callback de eventos de rede */
 static void wifi_reconnect_handler(struct k_work *work)
 {
-    if (!atomic_get(&wifi_connected)) {
-        wifi_connect_request();
+    if (atomic_get(&wifi_connected)) {
+        return;
     }
+    if (atomic_get(&wifi_associated)) {
+        // already associated: asking to connect again only fails (-1) and tears the link down; fix the IP instead
+        wifi_check_ip_ready();
+        if (!atomic_get(&wifi_connected)) {
+            net_dhcpv4_restart(net_if_get_default());
+            k_work_reschedule(k_work_delayable_from_work(work), WIFI_RECONNECT_DELAY);
+        }
+        return;
+    }
+    // never ask for a connection more often than every WIFI_MIN_REQUEST_INTERVAL_MS: a request while the driver is still
+    // busy fails at once, and each failure used to trigger the next request, a loop that starved the whole board
+    static int64_t last_request_ms = -WIFI_MIN_REQUEST_INTERVAL_MS;
+    int64_t now = k_uptime_get();
+    if (now - last_request_ms < WIFI_MIN_REQUEST_INTERVAL_MS) {
+        k_work_reschedule(k_work_delayable_from_work(work), K_MSEC(WIFI_MIN_REQUEST_INTERVAL_MS - (now - last_request_ms)));
+        return;
+    }
+    last_request_ms = now;
+    wifi_connect_request();
 }
 
 static K_WORK_DELAYABLE_DEFINE(wifi_reconnect_work, wifi_reconnect_handler);
@@ -54,7 +93,7 @@ static K_WORK_DELAYABLE_DEFINE(wifi_reconnect_work, wifi_reconnect_handler);
 static void wifi_connection_lost(void)
 {
     atomic_clear(&wifi_connected);
-    k_sem_reset(&wifi_connected_sem);
+    atomic_clear(&wifi_associated);
     k_work_reschedule(&wifi_reconnect_work, WIFI_RECONNECT_DELAY);
 }
 
@@ -71,7 +110,14 @@ static void handle_wifi_events(struct net_mgmt_event_callback *cb, uint64_t mgmt
                 break;
             }
             LOG_INF("WiFi conectado ...");
+            // modem sleep (the ESP-IDF default) delays every frame to the next beacon: ping RTT of 100+ ms and lost
+            // packets on some APs, which stalls the TCP send of the model (-ENOBUFS); keep the radio awake
+            if (esp_wifi_set_ps(WIFI_PS_NONE) != ESP_OK) {
+                LOG_WRN("Nao foi possivel desligar o power save do Wi-Fi");
+            }
+            atomic_set(&wifi_associated, 1);
             net_dhcpv4_start(iface);
+            wifi_check_ip_ready();
             break;
         case NET_EVENT_WIFI_DISCONNECT_RESULT:
             LOG_INF("WiFi perdeu a conexão, reconectando ...");
@@ -115,10 +161,35 @@ void wifi_wait_connected(void)
     while (!wifi_is_connected()) {
         if (k_sem_take(&wifi_connected_sem, K_SECONDS(15)) != 0) {
             LOG_WRN("Aguardando conexão Wi-Fi...");
-            k_work_reschedule(&wifi_reconnect_work, K_NO_WAIT);
+            if (!k_work_delayable_is_pending(&wifi_reconnect_work)) {
+                k_work_reschedule(&wifi_reconnect_work, K_NO_WAIT);
+            }
         }
     }
 }
+
+/* The local training keeps the board without network traffic for 1-2 minutes; some APs drop a silent station, which
+ * showed up as "WiFi perdeu a conexão" at the first send after every training. A 1-byte UDP datagram every 10 s
+ * (to the discard port of the server) keeps the association alive. Runs on the system workqueue, so it also runs
+ * while the main thread is busy training. */
+static void keepalive_handler(struct k_work *work)
+{
+    if (atomic_get(&wifi_connected)) {
+        int s = zsock_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (s >= 0) {
+            struct sockaddr_in addr = {0};
+            char byte = 0;
+            addr.sin_family = AF_INET;
+            addr.sin_port = htons(9);
+            zsock_inet_pton(AF_INET, SERVER_IP, &addr.sin_addr);
+            zsock_sendto(s, &byte, 1, ZSOCK_MSG_DONTWAIT, (struct sockaddr *)&addr, sizeof(addr));
+            zsock_close(s);
+        }
+    }
+    k_work_reschedule(k_work_delayable_from_work(work), KEEPALIVE_PERIOD);
+}
+
+static K_WORK_DELAYABLE_DEFINE(keepalive_work, keepalive_handler);
 
 void WIFIConfiguration(void)
 {
@@ -133,6 +204,7 @@ void WIFIConfiguration(void)
 
     // 2. Solicita a conexão
     wifi_connect_request();
+    k_work_schedule(&keepalive_work, KEEPALIVE_PERIOD);
 }
 
 void GPIOConfiguration(void)

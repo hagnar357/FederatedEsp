@@ -1,6 +1,7 @@
 #include "../lib/JSONConverter.h"
 #include "../lib/federatedlearning.h"
 #include "../lib/configs.h"
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -91,22 +92,66 @@ cJSON* TeacherTaskToJSON() {
     return root;
 }
 
-//TEACHER (phase 2): the trained teacher plus the distillation parameters used by the nodes
-//(contract of GET /api/getteachermodel); NULL while no trained teacher exists
-cJSON* TeacherModelToJSON() {
+//TEACHER (phase 2): the trained teacher plus the distillation parameters used by the nodes.
+//full=true serializes the whole network (used for the on-disk teacher.json artifact); full=false
+//truncates it to Encoder+Latent only, dropping Decoder+Reconstruction, which KD_MODE_LATENT students
+//never read (see NeuralNetworkTraining in FederatedLearningZephyr/src/federatedlearning.c) -- this is
+//the payload actually served over the wire, roughly halving it for the encoder-decoder architecture.
+//NULL while no trained teacher exists.
+static cJSON* BuildTeacherModelJSON(bool full) {
     NodeControl* nodecontrol = getFederatedLearningInstance()->nodecontrol;
     if (!nodecontrol->teachertrained) return NULL;
 
-    cJSON* root = cJSON_CreateObject();
-    if (!root) return NULL;
+    NeuralNetwork *teacher = nodecontrol->teacherneuralnetwork;
+    int latentindex = nodecontrol->teacherlatentlayerindex;
 
-    cJSON_AddNumberToObject(root, "globalmodelstatus", 1);
-    cJSON_AddNumberToObject(root, "trainingscounter", nodecontrol->teachertrainingscounter);
-    cJSON* distillation = cJSON_AddObjectToObject(root, "distillation");
-    cJSON_AddNumberToObject(distillation, "temperature", KD_TEMPERATURE);
-    cJSON_AddNumberToObject(distillation, "alpha", KD_ALPHA);
-    cJSON_AddItemToObject(root, "neuralnetwork", NeuralNetworkToJSON(nodecontrol->teacherneuralnetwork));
+    // temporarily cut the chain right after the latent layer so NeuralNetworkToJSON's walk (and the
+    // "layers" count it serializes) only sees Input..Latent; restored before returning. Safe because
+    // every caller of this function already holds FederatedLearningLock().
+    Layer *cutlayer = NULL;
+    Layer *savednext = NULL;
+    int savedlayers = teacher->layers;
+    if (!full && latentindex >= 0) {
+        cutlayer = teacher->firstlayer;
+        for (int i = 0; i < latentindex; i++) {
+            cutlayer = cutlayer->nextlayer;
+        }
+        savednext = cutlayer->nextlayer;
+        cutlayer->nextlayer = NULL;
+        teacher->layers = latentindex + 1;
+    }
+
+    cJSON* root = cJSON_CreateObject();
+    if (root) {
+        cJSON_AddNumberToObject(root, "globalmodelstatus", 1);
+        cJSON_AddNumberToObject(root, "trainingscounter", nodecontrol->teachertrainingscounter);
+        cJSON* distillation = cJSON_AddObjectToObject(root, "distillation");
+        cJSON_AddStringToObject(distillation, "mode", latentindex >= 0 ? "latent" : "logit");
+        cJSON_AddNumberToObject(distillation, "temperature", KD_TEMPERATURE); // kept, unused in "latent" mode
+        cJSON_AddNumberToObject(distillation, "alpha", KD_ALPHA);
+        if (latentindex >= 0) {
+            cJSON_AddNumberToObject(distillation, "studentlayerindex", KD_STUDENT_HINT_LAYER);
+        }
+        cJSON_AddItemToObject(root, "neuralnetwork", NeuralNetworkToJSON(teacher));
+    }
+
+    if (cutlayer != NULL) {
+        cutlayer->nextlayer = savednext;
+    }
+    teacher->layers = savedlayers;
+
     return root;
+}
+
+cJSON* TeacherModelToJSON() {
+    return BuildTeacherModelJSON(true);
+}
+
+//contract of GET /api/getteachermodel: the latent layer is always the last layer of the received
+//network, so nodes no longer need a transmitted "latentlayerindex" to find it (same as KD_MODE_LOGIT
+//already does with its output layer)
+cJSON* TeacherModelForNodesToJSON() {
+    return BuildTeacherModelJSON(false);
 }
 
 

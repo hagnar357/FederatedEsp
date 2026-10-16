@@ -68,9 +68,9 @@ cp /caminho/para/seu/dataset.csv fs_data/
 ```
 
 ### Passo 3.2: Gerar o arquivo `.bin`
-Execute o `mklittlefs` para empacotar a pasta em uma imagem de 1MB (tamanho padrão da partição de armazenamento):
+Execute o `mklittlefs` para empacotar a pasta em uma imagem de 2MB (tamanho da partição de armazenamento):
 ```bash
-mklittlefs -c fs_data -p 16 -b 4096 -s 1048576 storage.bin
+mklittlefs -c fs_data -p 16 -b 4096 -s 2883584 storage.bin
 ```
 
 ### Passo 3.3: Injetar a imagem na Flash do ESP32-S3
@@ -119,16 +119,28 @@ west build -b heltec_wireless_stick_lite_v3/esp32s3/procpu ./FederatedEdgeComput
 
 ## 7. Knowledge Distillation (Destilação de Conhecimento)
 
-O nó pode treinar o modelo local destilando um **teacher enviado pelo servidor**. O modelo local (student) mantém a arquitetura do modelo global, que é o que o servidor aceita na agregação. O teacher pode ter qualquer arquitetura, desde que tenha o mesmo número de entradas e de saídas e a camada de saída seja SOFTMAX.
+O nó pode treinar o modelo local destilando um **teacher enviado pelo servidor**. O modelo local (student) mantém a arquitetura do modelo global, que é o que o servidor aceita na agregação. Existem dois modos, escolhidos pelo servidor (`distillation.mode` no JSON do teacher):
 
-### Função de perda
+- **`logit`** — o teacher é um classificador (mesmo número de entradas/saídas do student, saída SOFTMAX); a destilação compara os **logits de saída** dos dois, com temperatura.
+- **`latent`** — o teacher é um **autoencoder puro** (sem camada de classificação, treinado só para reconstruir sua própria entrada); a destilação compara uma **camada oculta do student** (escolhida pelo servidor em `studentlayerindex`; por padrão a última) com a **camada latente (bottleneck)** do teacher, de mesma largura.
+
+### Função de perda — modo `logit`
 Para cada amostra, com logits do student `z_s`, logits do teacher `z_t`, temperatura `T` e peso `alpha`:
 
 ```
 L = (1 - alpha) * CE(y, softmax(z_s)) + alpha * T^2 * KL( softmax(z_t/T) || softmax(z_s/T) )   (+ termo L1/L2 do modelo)
 dL/dz_s = (1 - alpha) * (softmax(z_s) - y) + alpha * T * (softmax(z_s/T) - softmax(z_t/T))
 ```
-Com `alpha = 0`, o treino é idêntico ao treino sem destilação.
+
+### Função de perda — modo `latent`
+Com `h_s` = camada oculta do student em `studentlayerindex` (pós-ativação) e `h_t` = camada latente do teacher (pós-ativação), mesma largura `n`:
+
+```
+L = (1 - alpha) * CE(y, softmax(z_s)) + alpha * MSE(h_s, h_t)
+```
+O gradiente extra (`alpha * (2/n)*(h_s - h_t) * f'(Z_hint)`) é somado ao gradiente da classificação exatamente nessa camada do student, antes de atualizar os pesos que chegam nela e de continuar o backprop. `temperature` continua presente no JSON por compatibilidade, mas não é usado neste modo.
+
+Em ambos os modos, com `alpha = 0` o treino é idêntico ao treino sem destilação.
 
 ### Ativação
 Por Kconfig (`prj.conf`), desligado por padrão:
@@ -149,13 +161,16 @@ KnowledgeDistillationGetConfig();          // valores efetivos (os do servidor t
 ### Contrato com o servidor
 O servidor treina o teacher numa fase inicial, através do cliente simulado (`../FederatedLearningTeacherClient`), e depois o disponibiliza em `GET /api/getteachermodel`. Enquanto o teacher está sendo treinado, o nó recebe `status: 0` em `/api/checkglobalmodel` e continua aguardando.
 
-Com a destilação ligada, a cada rodada o nó faz `GET /api/getteachermodel` (uma tentativa, sem repetir em 4xx) antes de treinar. A resposta usa o **mesmo JSON de `/api/getglobalmodel`**, com um objeto opcional de parâmetros:
+Com a destilação ligada, o nó faz `GET /api/getteachermodel` (uma tentativa, sem repetir em 4xx) antes de treinar, **só enquanto ainda não tem um teacher**: o teacher não muda depois da fase inicial, então fica em cache nas rodadas seguintes. A resposta usa o **mesmo JSON de `/api/getglobalmodel`**, com um objeto opcional de parâmetros:
 ```json
 {
-  "distillation": { "temperature": 3.0, "alpha": 0.5 },
-  "neuralnetwork": { "layers": 3, "layersArray": [ ... ] }
+  "distillation": { "mode": "latent", "temperature": 3.0, "alpha": 0.5, "studentlayerindex": 2 },
+  "neuralnetwork": { "layers": 4, "layersArray": [ ... ] }
 }
 ```
-- `temperature` e `alpha`, quando enviados, substituem os valores locais.
-- Se a requisição falhar, o nó usa o teacher recebido numa rodada anterior. Se nunca recebeu um teacher, treina sem destilação. O modelo continua sendo enviado normalmente.
-- O teacher é parseado com cJSON no heap (`CONFIG_HEAP_MEM_POOL_SIZE`). Um teacher muito maior que o modelo atual pode exigir aumentar esse heap.
+- `mode` ausente é tratado como `"logit"` (compatibilidade com um servidor antigo).
+- No modo `latent` o servidor envia só **encoder + latente** (o decoder nunca é usado pelo student), então a camada latente é sempre a última de `layersArray`.
+- `studentlayerindex` (só no modo `latent`; 0-based, 0 = entrada, 1 = primeira oculta…) indica a camada do student comparada com a latente. Ausente = última camada oculta. Se não for uma camada oculta do student, ou se a largura não bater com a latente, o nó treina sem destilação.
+- `temperature` e `alpha`, quando enviados, substituem os valores locais (`temperature` só é usado no modo `logit`).
+- Se a requisição falhar, o nó treina aquela rodada sem destilação e tenta de novo na próxima. O modelo continua sendo enviado normalmente.
+- O teacher e o modelo global são parseados com cJSON usando o `malloc` da newlib, cuja arena é a DRAM livre entre `_end` e `_heap_sentry` — **não** o `CONFIG_HEAP_MEM_POOL_SIZE`, que é do kernel/Wi-Fi. Aumentar esse heap diminui a memória disponível para o modelo.

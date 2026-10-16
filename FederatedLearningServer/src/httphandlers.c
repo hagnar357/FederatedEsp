@@ -116,7 +116,7 @@ void handle_get_teachertask(int client_socket, char *ip_addr) {
 // Phase FEDERATED: the trained teacher + distillation parameters (404 while there is no teacher)
 void handle_get_teachermodel(int client_socket) {
     FederatedLearningLock();
-    cJSON *json_response = TeacherModelToJSON();
+    cJSON *json_response = TeacherModelForNodesToJSON();
     FederatedLearningUnlock();
 
     if (json_response == NULL) {

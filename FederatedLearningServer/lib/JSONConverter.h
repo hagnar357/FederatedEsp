@@ -8,6 +8,7 @@ cJSON* NeuralNetworkToJSON(const NeuralNetwork* neuralnetwork);
 cJSON* FederatedLearningToJSON(FederatedLearning* federatedLearning);
 cJSON* TeacherTaskToJSON();
 cJSON* TeacherModelToJSON();
+cJSON* TeacherModelForNodesToJSON();
 FederatedLearning* JSONToFederatedLearning(const cJSON* json);
 
 #endif

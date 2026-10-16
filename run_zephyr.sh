@@ -6,6 +6,14 @@ set -e
 # Configurações
 # ==========================
 
+# Uso: ./run_zephyr.sh [fração_teacher]   (float entre 0 e 1, opcional)
+TEACHER_PART="${1:-}"
+
+if [ -n "$TEACHER_PART" ] && ! awk -v v="$TEACHER_PART" 'BEGIN { exit !(v > 0 && v < 1) }'; then
+    echo "Erro: fração do teacher deve ser um número entre 0 e 1 (recebido: $TEACHER_PART)"
+    exit 1
+fi
+
 ROOT_DIR=$(pwd)
 
 ZEPHYR_DIR="FederatedLearningZephyr"
@@ -79,27 +87,43 @@ sed -i '/CLIENTS_NUM/c\#define CLIENTS_NUM '$NUM_CLIENTS'' \
 # Separar datasets (uma partição extra para o cliente teacher)
 # ==========================
 
-python3 separate_dataset.py "$NUM_CLIENTS"
+# Se TEACHER_PART (float entre 0 e 1) for informado, o teacher recebe um dataset balanceado
+# com essa fração do total, retirado antes da distribuição Dirichlet dos demais nós.
+python3 separate_dataset.py "$NUM_CLIENTS" ${TEACHER_PART:+"$TEACHER_PART"}
+
+# TEACHER_REMOTE=1: the teacher node runs on another computer (./run_remote_teacher.sh there). This script then does not
+# start the simulated node; it serves the teacher's slice and its KD flag over HTTP (only the datasets/ folder, read-only)
+TEACHER_REMOTE="${TEACHER_REMOTE:-0}"
+TEACHER_DATA_PORT="${TEACHER_DATA_PORT:-8000}"
+DATA_SERVER_PID=""
+if [ "$TEACHER_REMOTE" = "1" ]; then
+    if [ "$KD" = "1" ]; then : > datasets/teacher_remote.args; else echo "--no-kd" > datasets/teacher_remote.args; fi
+    python3 -m http.server "$TEACHER_DATA_PORT" --bind "${IP:-0.0.0.0}" --directory datasets > "$LOG_DIR/data_server.log" 2>&1 &
+    DATA_SERVER_PID=$!
+    echo "Professor remoto: dataset em http://${IP:-0.0.0.0}:$TEACHER_DATA_PORT/dataset_no_0.csv (PID $DATA_SERVER_PID)"
+fi
 
 # ==========================
 # Gravar filesystem de cada nó
 # ==========================
 
+IDX=0
 for tty in "${TTYS[@]}"; do
 
-    NODE_ID="${tty##*ttyUSB}"
+    # node id = position in the list of boards (not the ttyUSB number, which changes when a board is replugged)
+    NODE_ID=$IDX; IDX=$((IDX + 1))
 
     echo "Preparando dataset para nó $NODE_ID ($tty)"
 
     cp \
-      "datasets/dataset_no_${NODE_ID+1}.csv" \
+      "datasets/dataset_no_$((NODE_ID + 1)).csv" \
       "$ZEPHYR_DIR/fs_data/dataset.csv"
 
     mklittlefs \
       -c "$ZEPHYR_DIR/fs_data" \
       -p 16 \
       -b 4096 \
-      -s 1048576 \
+      -s 2883584 \
       storage.bin
 
     esptool.py \
@@ -138,7 +162,7 @@ while ss -tulnp | grep -q "8888"; do
     fi
 done
 
-trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+trap 'kill $SERVER_PID $DATA_SERVER_PID 2>/dev/null || true' EXIT
 
 (
     cd "$SERVER_DIR"
@@ -155,20 +179,33 @@ sleep 3
 # Cliente simulado (treina o teacher e participa do treino federado)
 # ==========================
 
-echo "Compilando cliente teacher..."
+if [ "$TEACHER_REMOTE" = "1" ]; then
+    echo "Professor remoto: aguardando o cliente do outro computador em $IP:8888 (nao inicio o no simulado aqui)"
+    TEACHER_CLIENT_PID=""
+    # same first line the local client writes, so catalog_runs.py can read the teacher's rows (the client log itself stays on the other computer)
+    echo "Teacher client: server $IP:8888/8080, dataset datasets/dataset_no_${TEACHER_NODE_ID}.csv ($(wc -l < "datasets/dataset_no_${TEACHER_NODE_ID}.csv") samples), role teacher, KD $([ "$KD" = "1" ] && echo on || echo off) (no remoto; o log completo esta no outro computador)" > "$LOG_DIR/teacher_client.log"
+    trap 'kill $SERVER_PID $DATA_SERVER_PID 2>/dev/null || true' EXIT
+else
+    echo "Compilando cliente teacher..."
 
-make -C "$TEACHER_CLIENT_DIR" build > "$LOG_DIR/teacher_client_build.log" 2>&1
+    make -C "$TEACHER_CLIENT_DIR" build > "$LOG_DIR/teacher_client_build.log" 2>&1
 
-"$TEACHER_CLIENT_DIR/FederatedLearningTeacherClient" \
-    --server "$IP" \
-    --dataset "datasets/dataset_no_${TEACHER_NODE_ID}.csv" \
-    > "$LOG_DIR/teacher_client.log" 2>&1 &
+    # KD=0: o cliente simulado também treina a fase federada sem destilação
+    TEACHER_CLIENT_ARGS=()
+    if [ "$KD" != "1" ]; then TEACHER_CLIENT_ARGS+=(--no-kd); fi
 
-TEACHER_CLIENT_PID=$!
+    "$TEACHER_CLIENT_DIR/FederatedLearningTeacherClient" \
+        --server "$IP" \
+        --dataset "datasets/dataset_no_${TEACHER_NODE_ID}.csv" \
+        "${TEACHER_CLIENT_ARGS[@]}" \
+        > "$LOG_DIR/teacher_client.log" 2>&1 &
 
-trap 'kill $SERVER_PID $TEACHER_CLIENT_PID 2>/dev/null || true' EXIT
+    TEACHER_CLIENT_PID=$!
 
-echo "Cliente teacher PID: $TEACHER_CLIENT_PID"
+    trap 'kill $SERVER_PID $TEACHER_CLIENT_PID $DATA_SERVER_PID 2>/dev/null || true' EXIT
+
+    echo "Cliente teacher PID: $TEACHER_CLIENT_PID"
+fi
 
 # ==========================
 # Build do firmware
@@ -205,9 +242,10 @@ done
 
 MONITOR_PIDS=()
 
+IDX=0
 for tty in "${TTYS[@]}"; do
 
-    NODE_ID="${tty##*ttyUSB}"
+    NODE_ID=$IDX; IDX=$((IDX + 1))
 
     python3 -u - "$tty" \
         > "$ROOT_DIR/$CLIENT_LOG_DIR/no_${NODE_ID}.log" 2>&1 <<'PYEOF' &

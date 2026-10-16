@@ -13,6 +13,8 @@
 /* No Zephyr, registramos o módulo de log assim, sem precisar passar a TAG nos prints */
 LOG_MODULE_REGISTER(WebSocketClient, LOG_LEVEL_INF);
 
+#define WS_SEND_FRAGMENT_SIZE 1024
+
 // Retorna 0 se o modelo local foi enviado
 int websocket_send_local_model(int round)
 {
@@ -86,14 +88,24 @@ int websocket_send_local_model(int round)
     char *json_string = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);   // Corrige o vazamento da árvore JSON
 
-    // 6. Enviar os dados via WebSocket
+    // 6. Enviar os dados via WebSocket, em fragmentos: websocket_send_msg faz k_malloc de uma cópia
+    // de cada fragmento para aplicar a máscara, e o heap do kernel (compartilhado com o Wi-Fi) não
+    // garante um bloco contíguo do tamanho do modelo inteiro. O servidor junta os fragmentos.
     ret = -1;
     if (json_string != NULL) {
-        LOG_INF("Enviando modelo local (%zu bytes)...", strlen(json_string));
-        
-        ret = websocket_send_msg(ws_sock, json_string, strlen(json_string),
-                                 WEBSOCKET_OPCODE_DATA_TEXT, true, true, SYS_FOREVER_MS);
-        
+        size_t total = strlen(json_string);
+        LOG_INF("Enviando modelo local (%zu bytes)...", total);
+
+        size_t offset = 0;
+        do {
+            size_t chunk = MIN(total - offset, WS_SEND_FRAGMENT_SIZE);
+            enum websocket_opcode opcode = (offset == 0) ? WEBSOCKET_OPCODE_DATA_TEXT
+                                                         : WEBSOCKET_OPCODE_CONTINUE;
+            ret = websocket_send_msg(ws_sock, (const uint8_t *)json_string + offset, chunk,
+                                     opcode, true, offset + chunk == total, SYS_FOREVER_MS);
+            offset += chunk;
+        } while (ret >= 0 && offset < total);
+
         if (ret < 0) {
             LOG_ERR("Falha ao enviar os dados: %d", ret);
         } else {

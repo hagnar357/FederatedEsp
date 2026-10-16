@@ -10,17 +10,22 @@ LOG_MODULE_REGISTER(KnowledgeDistillation, LOG_LEVEL_INF);
 
 #define KD_MIN_PROBABILITY 1e-7f
 
-// local configuration (Kconfig defaults, changed by the runtime API)
+// local configuration (Kconfig defaults, changed by the runtime API); mode is only ever known once a
+// teacher is received, so it is not part of the Kconfig-backed defaults
 static KnowledgeDistillationConfig localconfig = {
   .enabled = IS_ENABLED(CONFIG_FL_KNOWLEDGE_DISTILLATION),
+  .mode = KD_MODE_LOGIT,
   .temperature = CONFIG_FL_KD_TEMPERATURE_X10 / 10.0f,
   .alpha = CONFIG_FL_KD_ALPHA_PERCENT / 100.0f,
+  .studentlayerindex = -1,
 };
 
 static NeuralNetwork *teacher = NULL;
-// hyperparameters sent with the teacher (<= 0: use the local configuration)
-static float teachertemperature = 0;
-static float teacheralpha = -1;
+// hyperparameters sent with the teacher
+static int teachermode = KD_MODE_LOGIT;
+static float teachertemperature = 0;     // <= 0: use the local configuration (KD_MODE_LOGIT only)
+static float teacheralpha = -1;          // <  0: use the local configuration
+static int teacherstudentlayerindex = -1; // KD_MODE_LATENT only; -1: student's last hidden layer
 
 static bool ValidTemperature(float temperature){
   return temperature > 0 && isfinite(temperature);
@@ -55,12 +60,14 @@ bool KnowledgeDistillationIsEnabled(void){
 
 KnowledgeDistillationConfig KnowledgeDistillationGetConfig(void){
   KnowledgeDistillationConfig config = localconfig;
-  if (ValidTemperature(teachertemperature)) {
+  config.mode = teachermode;
+  if (teachermode == KD_MODE_LOGIT && ValidTemperature(teachertemperature)) {
     config.temperature = teachertemperature;
   }
   if (ValidAlpha(teacheralpha)) {
     config.alpha = teacheralpha;
   }
+  config.studentlayerindex = teacherstudentlayerindex;
   return config;
 }
 
@@ -69,11 +76,14 @@ KnowledgeDistillationConfig KnowledgeDistillationGetConfig(void){
 void KnowledgeDistillationClearTeacher(void){
   freeNeuralNetwork(teacher);
   teacher = NULL;
+  teachermode = KD_MODE_LOGIT;
   teachertemperature = 0;
   teacheralpha = -1;
+  teacherstudentlayerindex = -1;
 }
 
-int KnowledgeDistillationSetTeacher(FederatedLearning *newteacher, float temperature, float alpha){
+int KnowledgeDistillationSetTeacher(FederatedLearning *newteacher, int mode, float temperature, float alpha,
+                                    int studentlayerindex){
   if (newteacher == NULL) {
     return -1;
   }
@@ -82,21 +92,47 @@ int KnowledgeDistillationSetTeacher(FederatedLearning *newteacher, float tempera
   newteacher->neuralnetwork = NULL;
   freeFederatedLearning(newteacher);
 
-  if (network == NULL || network->firstlayer == NULL || network->lastlayer == NULL ||
-      network->lastlayer->activationfunctiontype != SOFTMAX) {
-    LOG_ERR("Teacher rejected: it needs a SOFTMAX output layer");
+  if (network == NULL || network->firstlayer == NULL || network->lastlayer == NULL) {
+    LOG_ERR("Teacher rejected: empty network");
+    freeNeuralNetwork(network);
+    return -1;
+  }
+
+  if (mode == KD_MODE_LOGIT) {
+    if (network->lastlayer->activationfunctiontype != SOFTMAX) {
+      LOG_ERR("Teacher rejected: KD_MODE_LOGIT needs a SOFTMAX output layer");
+      freeNeuralNetwork(network);
+      return -1;
+    }
+  } else if (mode == KD_MODE_LATENT) {
+    // the server only ever serves Encoder+Latent for this mode, so the latent layer is always
+    // lastlayer; it just needs to be an actual hidden layer (not the input itself)
+    if (network->layers < 2) {
+      LOG_ERR("Teacher rejected: KD_MODE_LATENT needs at least 2 layers, got %d", network->layers);
+      freeNeuralNetwork(network);
+      return -1;
+    }
+  } else {
+    LOG_ERR("Teacher rejected: unknown distillation mode %d", mode);
     freeNeuralNetwork(network);
     return -1;
   }
 
   KnowledgeDistillationClearTeacher();
   teacher = network;
+  teachermode = mode;
   teachertemperature = ValidTemperature(temperature) ? temperature : 0;
   teacheralpha = ValidAlpha(alpha) ? alpha : -1;
+  teacherstudentlayerindex = (mode == KD_MODE_LATENT && studentlayerindex >= 0) ? studentlayerindex : -1;
 
   KnowledgeDistillationConfig config = KnowledgeDistillationGetConfig();
-  LOG_INF("Teacher updated: %d layers, T=%.2f, alpha=%.2f", teacher->layers,
-          (double)config.temperature, (double)config.alpha);
+  if (mode == KD_MODE_LATENT) {
+    LOG_INF("Teacher updated: %d layers, mode=latent, alpha=%.2f, studentlayerindex=%d",
+            teacher->layers, (double)config.alpha, teacherstudentlayerindex);
+  } else {
+    LOG_INF("Teacher updated: %d layers, mode=logit, T=%.2f, alpha=%.2f",
+            teacher->layers, (double)config.temperature, (double)config.alpha);
+  }
   return 0;
 }
 
@@ -105,13 +141,37 @@ NeuralNetwork *KnowledgeDistillationGetTeacher(void){
 }
 
 bool KnowledgeDistillationTeacherCompatible(const NeuralNetwork *student){
-  return teacher != NULL && student != NULL &&
-         teacher->firstlayer->neurons == student->firstlayer->neurons &&
-         teacher->lastlayer->neurons == student->lastlayer->neurons &&
+  if (teacher == NULL || student == NULL || teacher->firstlayer->neurons != student->firstlayer->neurons) {
+    return false;
+  }
+
+  if (teachermode == KD_MODE_LATENT) {
+    int index = KnowledgeDistillationStudentHintIndex(student);
+    if (index < 0) {
+      return false;
+    }
+    Layer *hintlayer = student->firstlayer;
+    for (int i = 0; i < index; i++) {
+      hintlayer = hintlayer->nextlayer;
+    }
+    return teacher->lastlayer->neurons == hintlayer->neurons;
+  }
+
+  // KD_MODE_LOGIT
+  return teacher->lastlayer->neurons == student->lastlayer->neurons &&
          student->lastlayer->activationfunctiontype == SOFTMAX;
 }
 
-//////////////////////////////////////////////////LOSS//////////////////////////////////////////////////
+int KnowledgeDistillationStudentHintIndex(const NeuralNetwork *student){
+  if (student == NULL) {
+    return -1;
+  }
+  int index = teacherstudentlayerindex >= 0 ? teacherstudentlayerindex : student->layers - 2;
+  // must be a hidden layer: not the input (0) nor the output (layers - 1)
+  return (index >= 1 && index <= student->layers - 2) ? index : -1;
+}
+
+//////////////////////////////////////////////////LOSS: KD_MODE_LOGIT//////////////////////////////////////////////////
 
 // numerically stable softmax(logits / temperature)
 static void TemperedSoftMax(const float *logits, int n, float temperature, float *probabilities){
@@ -170,5 +230,22 @@ void KnowledgeDistillationOutputDelta(const float *label, const float *studentlo
   for (int i = 0; i < n; i++) {
     delta[i] = (1 - alpha) * (studentprobabilities[i] - label[i]) +
                alpha * temperature * (studentsoft[i] - teachersoft[i]);
+  }
+}
+
+//////////////////////////////////////////////////LOSS: KD_MODE_LATENT//////////////////////////////////////////////////
+
+float KnowledgeDistillationFeatureLoss(const float *studenthidden, const float *teacherhidden, int n){
+  float sum = 0;
+  for (int i = 0; i < n; i++) {
+    float diff = studenthidden[i] - teacherhidden[i];
+    sum += diff * diff;
+  }
+  return sum / n;
+}
+
+void KnowledgeDistillationFeatureDelta(const float *studenthidden, const float *teacherhidden, int n, float *delta){
+  for (int i = 0; i < n; i++) {
+    delta[i] = (2.0f / n) * (studenthidden[i] - teacherhidden[i]);
   }
 }

@@ -42,7 +42,7 @@ def argmax_curve(run):
     return out
 
 
-cat = [r for r in csv.DictReader(open(f"{ROOT}/catalogo_runs.csv")) if r["linhas_pool"] == POOL
+cat = [r for r in csv.DictReader(open(f"{ROOT}/catalogo_runs.csv")) if r["semente_pesos"] == os.environ.get("PLOT_SEED", "42") and r["linhas_pool"] == POOL
        and r["rodadas_concluidas"] == "32" and r["rodadas_com_todos_os_nos"] == "32"
        and (r["kd"] == "não" or (r["kd_modo"] == "logit" and r["kd_temperatura"] == "2.00"))]
 runs = {}

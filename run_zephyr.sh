@@ -20,12 +20,11 @@ ZEPHYR_DIR="FederatedLearningZephyr"
 SERVER_DIR="FederatedLearningServer"
 TEACHER_CLIENT_DIR="FederatedLearningTeacherClient"
 
-# Placa: padrão = Heltec Wireless Stick Lite V3 (ESP32-S3). Para um ESP32 clássico (ex.: devkit com ESP32-D0WD):
-#   BOARD=esp32_devkitc/esp32/procpu CHIP=esp32 OVERLAY=esp32.overlay ./run_zephyr.sh ...
-BOARD="${BOARD:-heltec_wireless_stick_lite_v3/esp32s3/procpu}"
-CHIP="${CHIP:-esp32s3}"
-[ "$CHIP" = "esp32" ] && export MONITOR_NO_RESET=1   # the serial monitor must not reset the classic ESP32
-OVERLAY="${OVERLAY:-}"   # arquivo de overlay (relativo a FederatedLearningZephyr/); vazio = app.overlay
+# Placas: o tipo de cada placa em /dev/ttyUSB* é detectado com o esptool e pode haver S3 e ESP32 clássico ao mesmo tempo
+# (um firmware por tipo, gravado só nas placas do tipo; ver lib_boards.sh). Para forçar um tipo em todas as placas:
+#   BOARD_TYPE=s3|esp32 ./run_zephyr.sh ...        ou, para uma placa fora desses dois:
+#   BOARD=<placa west> CHIP=<chip esptool> OVERLAY=<arquivo, opcional> ./run_zephyr.sh ...
+source "$ROOT_DIR/lib_boards.sh"
 
 # KD=0 desliga a destilação nas placas (o teacher continua sendo treinado pelo cliente simulado)
 KD="${KD:-1}"
@@ -72,15 +71,32 @@ fi
 
 shopt -s nullglob
 
-TTYS=(/dev/ttyUSB*)
+# TTY_GLOB: padrão /dev/ttyUSB* (as placas com USB nativo aparecem como /dev/ttyACM*)
+TTYS=(${TTY_GLOB:-/dev/ttyUSB*})
 
 if [ ${#TTYS[@]} -eq 0 ]; then
     echo "Nenhuma placa encontrada."
     exit 1
 fi
 
+# tipo de cada placa: forçado por BOARD_TYPE (s3|esp32) ou BOARD/CHIP, senão detectado com o esptool
+FORCED=""
+if [ -n "${BOARD_TYPE:-}" ] && [ "$BOARD_TYPE" != auto ]; then FORCED=$BOARD_TYPE
+elif [ -n "${BOARD:-}${CHIP:-}" ]; then FORCED=custom; fi
+PORT_TYPE=(); PORT_CHIP=(); PORT_BUILD=(); PORT_BOARD=(); PORT_OVERLAY=()
+for tty in "${TTYS[@]}"; do
+    type=${FORCED:-$(board_detect_type "$tty")}
+    if [ "$type" = unknown ]; then
+        echo "Aviso: não consegui ler o chip de $tty; usando o firmware da S3 (force com BOARD_TYPE=s3|esp32)"
+        type=s3
+    fi
+    read -r pboard pchip poverlay pbuild <<< "$(board_params "$type")"
+    PORT_TYPE+=("$type"); PORT_BOARD+=("$pboard"); PORT_CHIP+=("$pchip"); PORT_BUILD+=("$pbuild")
+    PORT_OVERLAY+=("$([ "$poverlay" = - ] && echo "" || echo "$poverlay")")
+done
+
 echo "Placas encontradas:"
-printf '  %s\n' "${TTYS[@]}"
+for i in "${!TTYS[@]}"; do echo "  ${TTYS[$i]}  (${PORT_TYPE[$i]})"; done
 
 # As placas + o cliente simulado (teacher) participam do treino federado
 NUM_BOARDS=${#TTYS[@]}
@@ -134,7 +150,7 @@ for tty in "${TTYS[@]}"; do
       storage.bin
 
     esptool.py \
-      --chip "$CHIP" \
+      --chip "${PORT_CHIP[$NODE_ID]}" \
       --port "$tty" \
       --baud 460800 \
       write_flash \
@@ -225,21 +241,38 @@ cd ..
 
 if [ "$KD" = "1" ]; then KD_CONFIG="y"; else KD_CONFIG="n"; fi
 
-west build \
-    -b "$BOARD" \
-    "$ROOT_DIR/$ZEPHYR_DIR" \
-    --pristine \
-    -- -DCONFIG_FL_KNOWLEDGE_DISTILLATION=$KD_CONFIG ${OVERLAY:+-DDTC_OVERLAY_FILE=$OVERLAY}
+# um firmware por tipo de placa presente, cada um no seu diretório de build
+declare -A BUILT
+for k in "${!TTYS[@]}"; do
+    b=${PORT_BUILD[$k]}
+    [ -n "${BUILT[$b]}" ] && continue
+    BUILT[$b]=1
+    echo "Firmware para ${PORT_TYPE[$k]} (${PORT_BOARD[$k]}) em $b"
+    west build \
+        -b "${PORT_BOARD[$k]}" \
+        "$ROOT_DIR/$ZEPHYR_DIR" \
+        -d "$b" \
+        --pristine \
+        -- -DCONFIG_FL_KNOWLEDGE_DISTILLATION=$KD_CONFIG ${PORT_OVERLAY[$k]:+-DDTC_OVERLAY_FILE=${PORT_OVERLAY[$k]}}
+done
 
 # ==========================
 # Flash dos nós
 # ==========================
 
-for tty in "${TTYS[@]}"; do
+for k in "${!TTYS[@]}"; do
+    tty=${TTYS[$k]}
 
-    echo "Flashando $tty"
+    echo "Flashando $tty (${PORT_TYPE[$k]})"
 
-    west flash --esp-device "$tty"
+    # a flash that stops half way ("Packet content transfer stopped") is usually the USB link: retry, slower
+    flashed=0
+    for try in 1 2 3; do
+        baud=921600; [ "$try" -gt 1 ] && baud=460800
+        if west flash -d "${PORT_BUILD[$k]}" --esp-device "$tty" --esp-baud-rate "$baud"; then flashed=1; break; fi
+        echo "Falha ao flashar $tty (tentativa $try de 3)"; sleep 3
+    done
+    [ "$flashed" = 1 ] || { echo "Nao foi possivel flashar $tty"; exit 1; }
 
 done
 
@@ -254,6 +287,8 @@ for tty in "${TTYS[@]}"; do
 
     NODE_ID=$IDX; IDX=$((IDX + 1))
 
+    # the serial monitor must not reset a classic ESP32 when it opens the port (DTR/RTS are wired to EN/IO0)
+    MONITOR_NO_RESET=$([ "${PORT_CHIP[$NODE_ID]}" = esp32 ] && echo 1 || echo 0) \
     python3 -u - "$tty" \
         > "$ROOT_DIR/$CLIENT_LOG_DIR/no_${NODE_ID}.log" 2>&1 <<'PYEOF' &
 import serial, sys, os

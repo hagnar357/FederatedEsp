@@ -57,7 +57,8 @@ fi
 # network: the boards connect to the SSID of espconfiguration.h, the server must be on the same network
 ssid=$(awk '$2=="WIFI_SSID" {gsub(/"/,"",$3); print $3}' "$ROOT/FederatedLearningZephyr/include/espconfiguration.h" 2> /dev/null)
 now=$(iwgetid -r 2> /dev/null)
-if [ -n "$ssid" ] && [ "$ssid" = "$now" ]; then ok "este computador está na rede \"$now\" (a do firmware)"; else warn "firmware usa a rede \"$ssid\" e este computador está em \"${now:-sem Wi-Fi}\": as placas não alcançam o servidor"; fi
+if [ -n "$CHECK_SKIP_WIFI" ]; then :
+elif [ -n "$ssid" ] && [ "$ssid" = "$now" ]; then ok "este computador está na rede \"$now\" (a do firmware)"; else warn "firmware usa a rede \"$ssid\" e este computador está em \"${now:-sem Wi-Fi}\": as placas não alcançam o servidor"; fi
 for port in 8888 8080 8000; do
     if ss -tln 2> /dev/null | awk '{print $4}' | grep -qE ":$port\$"; then warn "porta $port já está em uso (sobra de outra run?)"; else ok "porta $port livre"; fi
 done

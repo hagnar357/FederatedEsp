@@ -7,13 +7,15 @@ import sys
 # in FederatedLearningServer/src/federatedlearning.c)
 NUM_FEATURES = 32
 NUM_CLASSES = 6
+# seed of the split between nodes and of the teacher's slice (DATA_SEED env, default 42; run_all_remote.sh sets it to SEED)
+DATA_SEED = int(os.environ.get("DATA_SEED", "42"))
 
 def particionar_non_iid_dirichlet(
     labels,
     num_clientes,
     alpha=0.5,
     min_size=20,
-    seed=42
+    seed=DATA_SEED
 ):
     """
     Particionamento não-IID via Dirichlet garantindo que cada cliente
@@ -91,7 +93,7 @@ if __name__ == "__main__":
             raise ValueError("A partição do teacher deve ser um float entre 0 e 1")
 
         num_clientes -= 1  # o teacher ocupa um dos nós (índice 0)
-        rng_teacher = np.random.default_rng(42)
+        rng_teacher = np.random.default_rng(DATA_SEED)
         classes = np.unique(labels_inteiros)
         menor_classe = min(int(np.sum(labels_inteiros == k)) for k in classes)
 

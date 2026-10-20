@@ -128,8 +128,9 @@ while IFS=: read -r label kd arch alpha layer; do
         for attempt in 1 2 3; do
             wait_ports_free
             before=$(ls log_run | grep '^run_')
-            echo "$IP" | KD=$kd bash run_zephyr.sh "$TEACHER_FRAC" > "$OUT/$label.out" 2>&1 &
+            echo "$IP" | KD=$kd bash run_zephyr.sh "$TEACHER_FRAC" > "$OUT/$label.try$attempt.out" 2>&1 &
             script_pid=$!
+            ln -sf "$label.try$attempt.out" "$OUT/$label.out"   # $label.out always points to the latest attempt
 
             run=""
             for _ in $(seq 900); do

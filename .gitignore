@@ -12,5 +12,14 @@ FederatedLearningTeacherClient/FederatedLearningTeacherClient
 log_run
 datasets_backup_iris/
 
-
+catalogo_runs.csv
 log_teacher_remoto
+
+datasets-full-testes/pamap2_data/
+datasets/*
+imgs/
+old_runs/
+*__pycache__*
+storage.bin
+
+

@@ -7,6 +7,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/time.h>
 
 #define BUFFER_SIZE 4096
 
@@ -18,7 +20,18 @@ struct ThreadArgs {
 void handle_request(int client_socket,struct sockaddr_in client_address) {
     
     char buffer[BUFFER_SIZE] = {0};
-    read(client_socket, buffer, BUFFER_SIZE - 1);
+
+    // The server serves one connection at a time: a client that connects and sends nothing (a half-open connection of a
+    // board that lost the Wi-Fi, or a port probe) must not block everybody else forever on read()
+    struct timeval receive_timeout = {5, 0};
+    setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout, sizeof(receive_timeout));
+
+    ssize_t received = read(client_socket, buffer, BUFFER_SIZE - 1);
+    if (received <= 0) {
+        // closed without a request, or timed out: nothing to answer (a "404" written to a closed socket only makes noise)
+        close(client_socket);
+        return;
+    }
     //printf("Request received:\n%s\n", buffer);
     //Extracting the bory from the request.
     char *body_start = strstr(buffer, "\r\n\r\n");

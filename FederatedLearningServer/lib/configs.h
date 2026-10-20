@@ -1,4 +1,4 @@
-#define IP_ADDRESS "192.168.3.5"
+#define IP_ADDRESS "10.42.0.1"
 
 // Global/student model shape: MUST match the dataset's CSV columns (id,x1..xN,y0..yC-1) and
 // separate_dataset.py's NUM_FEATURES/NUM_CLASSES. Currently: HAR reduced to 32 features (PCA from
@@ -36,7 +36,7 @@
 #define TEACHER_TIMEOUT_S 600         // give up waiting for the teacher and start FL without distillation
 
 // Knowledge distillation parameters sent to the nodes together with the teacher
-#define KD_TEMPERATURE 3.0f
+#define KD_TEMPERATURE 2.0f
 #define KD_ALPHA 0.5f
 // Latent mode only: student layer matched against the teacher's latent layer, 0-based (0 = input,
 // 1 = first hidden, 2 = second hidden). Must be a hidden layer with TEACHER_LATENT_NEURONS neurons.

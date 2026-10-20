@@ -1,3 +1,4 @@
+#include <signal.h>
 #include "lib/httpserver.h"
 #include "lib/websocketserver.h"
 #include "lib/federatedlearning.h"
@@ -15,6 +16,8 @@ struct ThreadArgs {
 
 
 int main() {
+    // writing to a connection that the other side already closed must fail with EPIPE, not kill the server
+    signal(SIGPIPE, SIG_IGN);
 
     setbuf(stdout, NULL);
 

@@ -27,8 +27,8 @@ SEED=${SEED:-0}
 RESTORE_DATASET=${RESTORE_DATASET:-har}
 RUN_TIMEOUT_S=${RUN_TIMEOUT_S:-7200}
 SWEEP_REDO=${SWEEP_REDO:-2}
-IP=${IP:-$(ip route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") print $(i + 1)}')}
-IP=${IP:-$(hostname -I | awk '{print $1}')}
+source "$ROOT/lib_boards.sh"
+IP=${IP:-$(server_ip)}   # IP=<ip> forces it
 RUNS=$(cat)
 [ -n "$RUNS" ] || { echo "no runs on stdin"; exit 1; }
 OUT="$ROOT/log_run/_sweep_$(date +%Y%m%d_%H%M%S)"

@@ -83,8 +83,9 @@ composition="$n_s3 x s3, $n_esp32 x esp32"
 
 total=0
 for f in "${FRACTIONS[@]}"; do total=$((total + $(runs_for "$f" | wc -l))); done
-IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") print $(i + 1)}')
-echo "plan: $total runs, fractions: ${FRACTIONS[*]}, teacher on another computer, this computer: ${IP:-?}"
+IP=${IP:-$(server_ip)}   # IP=<ip> ./run_all_remote.sh forces it
+export IP
+echo "plan: $total runs, fractions: ${FRACTIONS[*]}, teacher on another computer, this computer: ${IP:-?} (the boards, the server and the teacher must all be on this IP's network)"
 echo "boards: $boards ($composition; one firmware per kind), minimum $MIN_BOARDS"
 echo "(the teacher computer must be running: ./run_remote_teacher.sh ${IP:-<this IP>})"
 if [ -n "$DRY_RUN" ]; then

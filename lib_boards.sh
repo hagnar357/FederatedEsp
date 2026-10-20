@@ -24,3 +24,13 @@ board_params() {
         custom) echo "${BOARD:-heltec_wireless_stick_lite_v3/esp32s3/procpu} ${CHIP:-esp32s3} ${OVERLAY:--} build_custom" ;;
     esac
 }
+
+# IPv4 of this computer on the network of the boards: the Wi-Fi interface (wl*/ap*, also the hotspot) first, because the
+# default route may go through Ethernet, a VPN or virbr0/Hamachi; then the default route; then the first address.
+server_ip() {
+    local ip
+    ip=$(ip -4 -o addr show 2> /dev/null | awk '$2 ~ /^(wl|ap)/ {split($4, a, "/"); print a[1]; exit}')
+    [ -n "$ip" ] || ip=$(ip route get 1.1.1.1 2> /dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") print $(i + 1)}')
+    [ -n "$ip" ] || ip=$(hostname -I | awk '{print $1}')
+    echo "$ip"
+}
